@@ -42,7 +42,7 @@
 
 ## Known gaps carried forward
 
-- No CI pipeline yet. The project is not in a Git repository.
+- Code is on GitHub (`rajbirseo-alt/All-in-One-Email`, private). CI ([.github/workflows/ci.yml](../../.github/workflows/ci.yml)) runs build, all tests and a migration drift check on every push and pull request.
 - RLS policies ship with the conversation tables in Phase 3, which is the first phase with tables they protect.
 - The permission cache is per request (2 queries). Redis caching comes with Phase 2's Redis.
 - The local dev database contains one leftover test audit row (`action = 'test'`). It cannot be deleted, by design.
