@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Same build Render runs (shared → crypto → Prisma client → db → api → web).
+      - name: Build
+        run: npm run build
+
+      # Unit tests plus API end-to-end tests against a throwaway real PostgreSQL 17
+      # (tools/localdb) with the real migrations and seed.
+      - name: Test
+        run: npm test
+
+      - name: Migrations match the schema
+        run: >
+          node node_modules/prisma/build/index.js migrate diff
+          --from-migrations packages/db/prisma/migrations
+          --to-schema-datamodel packages/db/prisma/schema.prisma
+          --exit-code
+          --shadow-database-url "$SHADOW_DATABASE_URL"
+        env:
+          SHADOW_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/shadow
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: shadow
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
