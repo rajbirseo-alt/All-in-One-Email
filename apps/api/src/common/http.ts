@@ -18,6 +18,7 @@ export function cookieNames(cfg: AppConfig) {
     session: secure ? '__Host-crm_session' : 'crm_session',
     csrf: secure ? '__Host-crm_csrf' : 'crm_csrf',
     oauth: secure ? '__Host-crm_oauth' : 'crm_oauth',
+    mailOauth: secure ? '__Host-crm_mail_oauth' : 'crm_mail_oauth',
   };
 }
 

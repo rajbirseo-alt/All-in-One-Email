@@ -24,16 +24,44 @@ import { OrgController } from './org/org.controller';
 import { OrgService } from './org/org.service';
 import { HealthController } from './health/health.controller';
 import { setLoginRateLimit } from './auth/login-throttle';
+import { MAIL_ENDPOINTS, buildMailEndpoints, type MailEndpoints } from './mail/mail-endpoints';
+import { CredentialService } from './mail/credential.service';
+import { IngestService } from './mail/ingest.service';
+import { SyncService } from './mail/sync.service';
+import { SubscriptionService } from './mail/subscription.service';
+import { QueueService } from './mail/queue.service';
+import { MailboxConnectService } from './mail/mailbox-connect.service';
+import { MailboxService } from './mail/mailbox.service';
+import { MailboxController } from './mail/mailbox.controller';
+import { WebhooksController } from './mail/webhooks.controller';
+
+/** Providers shared by the HTTP API and the worker process. */
+export function mailProviders(cfg: AppConfig, mailEndpoints?: MailEndpoints) {
+  return [
+    { provide: MAIL_ENDPOINTS, useFactory: () => mailEndpoints ?? buildMailEndpoints(cfg) },
+    CredentialService,
+    IngestService,
+    SyncService,
+    SubscriptionService,
+    QueueService,
+  ];
+}
+
+export interface AppModuleOptions {
+  ssoProviders?: SsoProviderConfig[];
+  /** Tests point the mail module at local fake Google / Microsoft servers. */
+  mailEndpoints?: MailEndpoints;
+}
 
 @Module({})
 export class AppModule {
-  /** `ssoProviders` lets tests substitute a local OIDC issuer; production builds them from env. */
-  static register(cfg: AppConfig, opts: { ssoProviders?: SsoProviderConfig[] } = {}): DynamicModule {
+  /** `ssoProviders` / `mailEndpoints` let tests substitute local fakes; production builds them from env. */
+  static register(cfg: AppConfig, opts: AppModuleOptions = {}): DynamicModule {
     setLoginRateLimit(cfg.LOGIN_RATE_LIMIT_PER_MIN);
     return {
       module: AppModule,
       imports: [ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 300 }])],
-      controllers: [AuthController, UsersController, RolesController, OrgController, AuditController, HealthController],
+      controllers: [AuthController, UsersController, RolesController, OrgController, AuditController, HealthController, MailboxController, WebhooksController],
       providers: [
         { provide: APP_CONFIG, useValue: cfg },
         { provide: SSO_PROVIDERS, useFactory: () => opts.ssoProviders ?? buildSsoProviders(cfg) },
@@ -50,6 +78,9 @@ export class AppModule {
         UsersService,
         RolesService,
         OrgService,
+        ...mailProviders(cfg, opts.mailEndpoints),
+        MailboxConnectService,
+        MailboxService,
         // Order matters: rate-limit first, then authentication/authorisation.
         { provide: APP_GUARD, useClass: ThrottlerGuard },
         { provide: APP_GUARD, useClass: AuthGuard },

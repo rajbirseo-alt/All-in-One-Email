@@ -85,6 +85,18 @@ Errors fall into four classes that drive retry behaviour:
 - **Disconnect**: revoke the token at the provider, delete the subscription or watch, delete the credential, set status DISCONNECTED and schedule the purge (02 §Retention).
 - **Sync health**: `consecutiveFailures ≥ 5` sets status `ERROR` and alerts admins. The health screen shows lag (now − newest provider timestamp seen).
 
+## 5a. As built in Phase 2 (2026-11-17)
+
+Where the implementation differs from or narrows the plan above:
+- **Scopes requested at connect.** Gmail: `openid email https://www.googleapis.com/auth/gmail.modify`. `gmail.modify` also covers `messages.send`, so no separate `gmail.send` is needed. Microsoft: `openid email offline_access User.Read Mail.ReadWrite Mail.Send`. Both reuse the sign-in apps, with an extra redirect URI.
+- **Gmail initial sync** fetches messages one by one with 5 in parallel, not through batch requests. It skips messages already stored, so an interrupted import resumes where it stopped.
+- **Graph** sends `Prefer: IdType="ImmutableId"` on every call, so a message keeps its id when moved. Only top-level folders are listed. Child folders, shared mailboxes and the app-only Application Access Policy route are not built yet.
+- **Provider drafts are not imported.** CRM drafts come in Phase 3.
+- **Attachments**: metadata only. Content download and virus scanning come in Phase 3 with the attachment viewer.
+- **Status re-assessment** (a new inbound message re-opening CLOSED / REPLY_NOT_NEEDED) is left to Phase 6. Phase 2 maintains `awaitingReplySince`, `firstResponseAt` and the counts.
+- **Microsoft disconnect** cannot revoke a single refresh token: Graph only offers revoking all of a user's sessions. The stored token is deleted, and the audit entry records `providerRevoked: false`.
+- **Webhooks** reach the API through `crm-web` (`${APP_URL}/api/v1/webhooks/...`). Graph push is only enabled when `APP_URL` is https. Gmail push is only enabled when `GMAIL_PUBSUB_TOPIC` and `GMAIL_PUSH_SERVICE_ACCOUNT` are set.
+
 ## 6. Real-account test checklist (done per provider before it is marked complete)
 
 1. Connect 2+ accounts of the provider. Initial sync count matches the provider UI within the sync window.

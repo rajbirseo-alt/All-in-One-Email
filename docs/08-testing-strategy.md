@@ -5,7 +5,7 @@
 | Layer | Tooling | What it covers |
 |---|---|---|
 | Unit | Vitest | Threading algorithm, subject normalisation, MIME building (headers, no notes), SLA business-minute math, rule condition evaluator, permission resolution, encryption round-trip |
-| Integration | Vitest + Testcontainers (Postgres, Redis, GreenMail for IMAP/SMTP) | Ingestion pipeline idempotency, AccessPolicy queries + RLS against a real DB, queue retries, IMAP adapter against a real IMAP server |
+| Integration | Vitest against a throwaway real PostgreSQL (`tools/localdb`); local fake Google/Microsoft servers (`apps/api/test/fake-mail.ts`); GreenMail for IMAP/SMTP (Phase 4) | Ingestion pipeline idempotency, AccessPolicy queries + RLS against a real DB, queue retries, IMAP adapter against a real IMAP server |
 | Contract | Recorded fixtures from real provider responses (sanitised) | Gmail history/messages/batch parsing; Graph delta/subscription payloads; error mapping (401/404/410/429) |
 | API / E2E | Supertest for API; Playwright for web | Full user flows per role; collision 409 flow; bulk actions |
 | Authorisation matrix | Generated test suite | For each of the 8 roles × every endpoint × own/assigned/team/dept/other records → expected allow/deny. Runs in CI on every PR |

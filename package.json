@@ -26,11 +26,11 @@
   },
   "scripts": {
     "db:local": "npm run start -w @crm/localdb",
-    "build": "npm run build -w @crm/shared && npm run build -w @crm/crypto && npm run generate -w @crm/db && npm run build -w @crm/db && npm run build -w @crm/api && npm run build -w @crm/web",
-    "test": "npm run build -w @crm/shared && npm run build -w @crm/crypto && npm run build -w @crm/db && npm test -w @crm/shared && npm test -w @crm/crypto && npm test -w @crm/api",
+    "build": "npm run build -w @crm/shared && npm run build -w @crm/crypto && npm run build -w @crm/providers && npm run generate -w @crm/db && npm run build -w @crm/db && npm run build -w @crm/api && npm run build -w @crm/web",
+    "test": "npm run build -w @crm/shared && npm run build -w @crm/crypto && npm run build -w @crm/providers && npm run build -w @crm/db && npm test -w @crm/shared && npm test -w @crm/crypto && npm test -w @crm/providers && npm test -w @crm/api",
     "db:migrate": "node --env-file=.env node_modules/prisma/build/index.js migrate deploy --schema packages/db/prisma/schema.prisma",
     "db:seed": "node --env-file=.env packages/db/dist/seed.js",
-    "build:api": "npm run build -w @crm/shared && npm run build -w @crm/crypto && npm run generate -w @crm/db && npm run build -w @crm/db && npm run build -w @crm/api",
+    "build:api": "npm run build -w @crm/shared && npm run build -w @crm/crypto && npm run build -w @crm/providers && npm run generate -w @crm/db && npm run build -w @crm/db && npm run build -w @crm/api",
     "build:web": "npm run build -w @crm/shared && npm run build -w @crm/web"
   }
 }

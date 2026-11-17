@@ -33,6 +33,11 @@
                    Gmail API  Graph API  IMAP/SMTP   OpenAI API     Object storage (S3-compatible)
 ```
 
+> **Implementation decisions (Phase 2, 2026-11-17).** These change the diagram above:
+> - **Job queue on PostgreSQL ([pg-boss](https://github.com/timgit/pg-boss)) instead of Redis + BullMQ.** It gives the same retries with backoff, cron schedules and one-job-per-mailbox deduplication. It needs no extra service: it runs on this machine without Docker and in tests against the same real PostgreSQL, and Render needs no Key Value service. Redis may still be added in Phase 3 if multi-instance WebSocket fan-out needs it.
+> - **The worker is `apps/api/src/worker.ts`**, a second entry point of the API codebase (Render service `crm-worker`), not a separate `apps/worker` package. Both share the same modules.
+> - **Provider clients are plain `fetch` code in `packages/providers`**, not `googleapis` / the Graph SDK. This keeps the dependencies small, makes error mapping explicit and lets the tests drive them against local fake servers.
+
 **Why the worker is a separate process:** sync and IMAP IDLE connections are long-running and hold many connections. Running them away from the HTTP API means heavy sync work can't slow the API down, and each can be scaled separately: more API replicas for users, more worker replicas for mailboxes.
 
 ## 3. Repository layout (npm workspaces monorepo)
@@ -105,7 +110,7 @@ docs/         This design set
 
 - **PostgreSQL 16**. Message bodies sit in `email_messages` (TOAST handles large bodies). Full-text search uses a generated `tsvector` with a GIN index. If search volume outgrows Postgres, switch to OpenSearch behind the same `SearchService` interface.
 - **Object storage** (S3 / Cloudflare R2 / GCS through the S3 API) for attachments. Server-side encryption is on, keys are content-addressed (`sha256`), and the bucket is private. Downloads go through the API (permission check, then a 60-second presigned URL with `Content-Disposition: attachment`).
-- **Redis 7** for BullMQ, socket.io adapter, rate limiting, presence and short-lived caches. Redis holds nothing that is the only copy of data.
+- **Job queue**: pg-boss tables in the same PostgreSQL (see the Phase 2 decision in §2). **Redis 7** is optional, for the socket.io adapter, presence and short-lived caches if needed later; it would hold nothing that is the only copy of data.
 
 ## 9. Deployment target
 
@@ -119,9 +124,9 @@ Observability: structured JSON logs (pino), OpenTelemetry traces, Sentry for err
 |---|---|---|
 | IMAP | `imapflow` | Maintained, supports IDLE, CONDSTORE/QRESYNC, async iterators |
 | SMTP / MIME | `nodemailer` + `mailparser` | Standard and robust; MailComposer gives full header control |
-| Gmail | `googleapis` (Gmail v1) | Official API; history + watch |
-| Microsoft | `@microsoft/microsoft-graph-client` + `@azure/msal-node` | Official SDK + token handling |
-| Queue | BullMQ | Delayed jobs (SLA), retries with backoff, rate limiting per provider |
+| Gmail | Gmail REST API v1 via `fetch` (`packages/providers`) | History + watch; explicit error mapping |
+| Microsoft | Graph REST v1.0 via `fetch` (`packages/providers`) | Delta queries, immutable ids, subscriptions |
+| Queue | pg-boss (PostgreSQL) | Retries with backoff, cron schedules, one queued + one running sync per mailbox |
 | Validation | Zod (shared) + Nest pipes | One schema used by both web forms and API |
 | HTML safety | `sanitize-html` on the server + sandboxed iframe render | Email HTML is hostile input |
 | Editor | TipTap | Rich text, mentions (for notes), extensible |

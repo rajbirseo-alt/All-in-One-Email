@@ -11,6 +11,7 @@ import { useSession } from '@/lib/session';
  * Inbox, CRM, reports etc. appear here in the phases that deliver their backends.
  */
 const NAV: { href: string; label: string; anyOf: PermissionKey[] }[] = [
+  { href: '/admin/mailboxes', label: 'Mailboxes', anyOf: ['account.connect', 'account.manage'] },
   { href: '/admin/users', label: 'Employees', anyOf: ['user.read'] },
   { href: '/admin/org', label: 'Departments & teams', anyOf: ['user.read', 'org.manage'] },
   { href: '/admin/roles', label: 'Roles & permissions', anyOf: ['role.manage'] },

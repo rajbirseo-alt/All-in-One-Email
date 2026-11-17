@@ -6,6 +6,7 @@ import type { SystemRoleKey } from '@crm/shared';
 import { loadConfig, type AppConfig } from '../src/config/config';
 import { createApp } from '../src/create-app';
 import type { SsoProviderConfig } from '../src/auth/sso.service';
+import type { MailEndpoints } from '../src/mail/mail-endpoints';
 
 export const DOMAIN = 'seodiscovery.test';
 export const APP_URL = 'http://localhost:3000';
@@ -24,9 +25,9 @@ export function testConfig(over: Record<string, string> = {}): AppConfig {
   });
 }
 
-export async function bootApp(opts: { ssoProviders?: SsoProviderConfig[]; env?: Record<string, string> } = {}) {
+export async function bootApp(opts: { ssoProviders?: SsoProviderConfig[]; env?: Record<string, string>; mailEndpoints?: MailEndpoints } = {}) {
   const cfg = testConfig(opts.env);
-  const app = await createApp(cfg, { ssoProviders: opts.ssoProviders ?? [] });
+  const app = await createApp(cfg, { ssoProviders: opts.ssoProviders ?? [], mailEndpoints: opts.mailEndpoints });
   await app.init();
   return { app, cfg };
 }

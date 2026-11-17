@@ -106,3 +106,75 @@ export interface SessionInfo {
   expiresAt: string;
   current: boolean;
 }
+
+// ── Mailboxes (Phase 2) ──
+export type MailProviderKey = 'GMAIL' | 'MICROSOFT' | 'IMAP';
+export type MailboxStatus = 'CONNECTING' | 'INITIAL_SYNC' | 'ACTIVE' | 'NEEDS_REAUTH' | 'ERROR' | 'PAUSED' | 'DISCONNECTED';
+
+export interface MailboxSummary {
+  id: string;
+  provider: MailProviderKey;
+  emailAddress: string;
+  displayName: string | null;
+  department: { id: string; name: string } | null;
+  status: MailboxStatus;
+  lastSyncedAt: string | null;
+  lastSuccessAt: string | null;
+  lastError: string | null;
+  consecutiveFailures: number;
+  messageCount: number;
+  threadCount: number;
+  /** Newest stored message; "lag" on the health screen is now minus this. */
+  newestMessageAt: string | null;
+  pushActive: boolean;
+  disconnectedAt: string | null;
+  purgeAfter: string | null;
+  purgedAt: string | null;
+  connectedBy: { id: string; name: string };
+  createdAt: string;
+}
+
+export interface MailboxFolderInfo {
+  id: string;
+  name: string;
+  type: string;
+  syncEnabled: boolean;
+  messageCount: number;
+  lastSyncedAt: string | null;
+}
+
+export interface MailboxAccessGrant {
+  id: string;
+  level: 'READ' | 'REPLY' | 'MANAGE';
+  user: { id: string; name: string; email: string } | null;
+  team: { id: string; name: string } | null;
+  department: { id: string; name: string } | null;
+}
+
+export interface SyncLogEntry {
+  id: string;
+  kind: string;
+  status: string;
+  messagesAdded: number;
+  messagesUpdated: number;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export interface MailboxDetail extends MailboxSummary {
+  syncFromDate: string | null;
+  folders: MailboxFolderInfo[];
+  subscriptions: { id: string; provider: string; resource: string; status: string; expiresAt: string; lastNotifiedAt: string | null }[];
+  access: MailboxAccessGrant[];
+  syncLogs: SyncLogEntry[];
+}
+
+export interface MailboxProvidersResponse {
+  gmail: boolean;
+  microsoft: boolean;
+  gmailPush: boolean;
+  microsoftPush: boolean;
+  initialSyncDays: number;
+  retentionDays: number;
+}

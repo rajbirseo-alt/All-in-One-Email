@@ -39,6 +39,18 @@ const schema = z
     SESSION_IDLE_HOURS: z.coerce.number().positive().default(12),
     SESSION_MAX_DAYS: z.coerce.number().positive().default(7),
     LOGIN_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(10),
+
+    // ── Mailboxes (Phase 2). Connecting reuses GOOGLE_* / MICROSOFT_* client credentials. ──
+    /** How far back the first sync of a new mailbox goes. */
+    MAIL_INITIAL_SYNC_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
+    /** Mail content of a disconnected mailbox is deleted after this many days (decided: 120). */
+    MAIL_RETENTION_DAYS: z.coerce.number().int().min(1).default(120),
+    /** Gmail push: Pub/Sub topic, e.g. projects/my-project/topics/gmail-push. Without it Gmail is polled every 5 minutes. */
+    GMAIL_PUBSUB_TOPIC: z.string().regex(/^projects\/[^/]+\/topics\/[^/]+$/, 'projects/<project>/topics/<topic>').optional(),
+    /** Service account the Pub/Sub push subscription authenticates as (its OIDC token is verified). */
+    GMAIL_PUSH_SERVICE_ACCOUNT: z.string().email().optional(),
+    /** Audience configured on the push subscription. Defaults to the webhook URL. */
+    GMAIL_PUSH_AUDIENCE: z.string().optional(),
   })
   .superRefine((c, ctx) => {
     if (c.NODE_ENV === 'production' && !c.APP_URL.startsWith('https://')) {
@@ -54,6 +66,9 @@ const schema = z
     if (ms !== 0 && ms !== 3) {
       ctx.addIssue({ code: 'custom', path: ['MICROSOFT_TENANT_ID'], message: 'set Microsoft client id, secret and tenant id together' });
     }
+    if (!!c.GMAIL_PUBSUB_TOPIC !== !!c.GMAIL_PUSH_SERVICE_ACCOUNT) {
+      ctx.addIssue({ code: 'custom', path: ['GMAIL_PUSH_SERVICE_ACCOUNT'], message: 'set GMAIL_PUBSUB_TOPIC and GMAIL_PUSH_SERVICE_ACCOUNT together' });
+    }
   });
 
 export type AppConfig = z.infer<typeof schema> & {
@@ -61,10 +76,16 @@ export type AppConfig = z.infer<typeof schema> & {
   googleEnabled: boolean;
   microsoftEnabled: boolean;
   appOrigin: string;
+  /** Public URL that providers call back (webhooks reach the API through the web proxy). */
+  webhookBaseUrl: string;
+  /** Graph only delivers notifications to https endpoints. */
+  graphPushEnabled: boolean;
+  gmailPushEnabled: boolean;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const parsed = schema.safeParse(env);
+  // A blank value means "not set" (Render can pass empty strings for unset references).
+  const parsed = schema.safeParse(Object.fromEntries(Object.entries(env).filter(([, v]) => v !== undefined && v.trim() !== '')));
   if (!parsed.success) {
     const lines = parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`).join('\n');
     throw new Error(`Invalid configuration:\n${lines}`);
@@ -76,6 +97,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     googleEnabled: !!c.GOOGLE_CLIENT_ID,
     microsoftEnabled: !!c.MICROSOFT_CLIENT_ID,
     appOrigin: new URL(c.APP_URL).origin,
+    webhookBaseUrl: `${new URL(c.APP_URL).origin}/api/v1/webhooks`,
+    graphPushEnabled: !!c.MICROSOFT_CLIENT_ID && c.APP_URL.startsWith('https://'),
+    gmailPushEnabled: !!c.GOOGLE_CLIENT_ID && !!c.GMAIL_PUBSUB_TOPIC,
   };
 }
 

@@ -129,6 +129,37 @@ export const auditQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
+// ── Mailboxes (Phase 2) ──
+export const MAIL_PROVIDERS = ['GMAIL', 'MICROSOFT'] as const;
+export const MAILBOX_ACCESS_LEVELS = ['READ', 'REPLY', 'MANAGE'] as const;
+
+export const connectMailboxSchema = z.object({
+  departmentId: id.nullable().optional(),
+  /** How many days of existing mail the first sync imports. */
+  syncDays: z.coerce.number().int().min(1).max(3650).optional(),
+});
+export const updateMailboxSchema = z
+  .object({ displayName: z.string().trim().max(120).nullable().optional(), departmentId: id.nullable().optional() })
+  .refine((v) => Object.keys(v).length > 0, 'Nothing to update');
+export const mailboxFoldersSchema = z.object({
+  folders: z.array(z.object({ folderId: id, syncEnabled: z.boolean() })).min(1).max(500),
+});
+export const mailboxAccessSchema = z.object({
+  grants: z
+    .array(
+      z
+        .object({
+          userId: id.optional(),
+          teamId: id.optional(),
+          departmentId: id.optional(),
+          level: z.enum(MAILBOX_ACCESS_LEVELS),
+        })
+        .refine((g) => [g.userId, g.teamId, g.departmentId].filter(Boolean).length === 1, 'Choose exactly one employee, team or department'),
+    )
+    .max(500),
+});
+export const mailboxSyncQuery = z.object({ full: z.enum(['true', 'false']).optional() });
+
 export type LoginInput = z.infer<typeof loginSchema>;
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;

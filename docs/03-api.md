@@ -42,23 +42,21 @@ Base path is `/api/v1`. The API uses JSON and is authenticated by an httpOnly se
 | CRUD | `/departments`, `/teams`, `/teams/:id/members` | `org.manage` |
 | GET | `/audit-logs?entityType&entityId&actorId&action&from&to` | `audit.read` |
 
-## Email accounts — Phases 2 and 4
+## Email accounts — Phase 2 (built) and Phase 4 (IMAP)
 | Method | Path | 🔒 / Notes |
 |---|---|---|
-| GET | `/accounts` | Accounts the caller can see, with health: status, lastSyncedAt, lastError, queue lag |
-| POST | `/accounts/oauth/:provider/start` | `account.connect`. Requests the mailbox scopes from 06 |
-| GET | `/accounts/oauth/:provider/callback` | Stores encrypted tokens, discovers folders, enqueues initial sync |
-| POST | `/accounts/imap/test` | `account.connect`. `{email, username, password, imap{host,port,security}, smtp{...}}` → per-step result (DNS, TLS, auth, list folders, SMTP auth) without saving |
-| POST | `/accounts/imap` | Same body. Saves after a successful test |
-| GET | `/accounts/:id` | Detail, folders, subscriptions, last 20 sync logs |
-| PATCH | `/accounts/:id` | `account.manage` — displayName, department, syncFromDate |
-| PUT | `/accounts/:id/folders` | `account.manage` — `[{folderId, syncEnabled}]` |
-| POST | `/accounts/:id/sync` | `account.manage` — manual incremental sync. `?full=true` triggers a resync |
-| POST | `/accounts/:id/reconnect` | Re-runs OAuth, or accepts a new password. Resumes from the existing cursors |
+| GET | `/accounts` | Signed in. Mailbox managers see all; others see mailboxes granted to them, their team or their department. Includes health: status, last success, last error, message/thread counts, newest message, push on/off |
+| GET | `/accounts/providers` | `account.connect` or `account.manage`. Which providers are configured, push availability, import window, retention days |
+| POST | `/accounts/oauth/:provider/start` | `account.connect`. `google` or `microsoft`. Body `{departmentId?, syncDays?}`. Returns `{url}` and sets a signed state cookie (PKCE verifier, state, starting user) |
+| GET | `/accounts/oauth/:provider/callback` | `account.connect`, same user who started. Stores the encrypted tokens, creates or reconnects the mailbox, queues the first sync. Redirects to `/admin/mailboxes?connected=<id>` or `?error=<code>` |
+| GET | `/accounts/:id` | `account.manage`. Detail: folders with counts, push subscriptions, access grants, last 20 sync runs |
+| PATCH | `/accounts/:id` | `account.manage`. `{displayName?, departmentId?}` |
+| PUT | `/accounts/:id/folders` | `account.manage`. `{folders:[{folderId, syncEnabled}]}` |
+| POST | `/accounts/:id/sync` | `account.manage`. Queues an incremental sync. `?full=true` re-reads the import window (deduplicated). 202 |
 | POST | `/accounts/:id/pause` · `/resume` | `account.manage` |
-| DELETE | `/accounts/:id` | `account.manage` — disconnect: revoke token, delete credential, schedule purge |
-| GET/PUT | `/accounts/:id/access` | `account.manage` — grants to users, teams or departments |
-| GET | `/accounts/:id/sync-logs` | `account.manage` |
+| DELETE | `/accounts/:id` | `account.manage`. Disconnect: stop push, revoke the token (Google), delete the credential, schedule the purge (120 days) |
+| PUT | `/accounts/:id/access` | `account.manage`. `{grants:[{userId | teamId | departmentId, level: READ|REPLY|MANAGE}]}`. Replaces all grants |
+| POST | `/accounts/imap/test` · `/accounts/imap` | Phase 4 |
 
 ## Webhooks (no session; each verified per provider)
 | Method | Path | Verification |

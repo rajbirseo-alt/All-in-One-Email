@@ -2,7 +2,7 @@
 
 A central place to connect every company mailbox (Gmail / Google Workspace, Microsoft 365 / Outlook, and IMAP/SMTP custom domains), with assignment, SLA tracking, CRM contacts and leads, AI-assisted drafting and management reporting.
 
-**Status:** Phase 1 (authentication, employees, permissions, database) is complete and verified locally. See [docs/phases/phase-1.md](docs/phases/phase-1.md). Next: Phase 2 (Gmail + Microsoft 365 mailboxes).
+**Status:** Phase 1 (authentication, employees, permissions, database) is complete and deployed on Render. Phase 2 (Gmail + Microsoft 365 mailboxes) is built and tested locally, and waits for verification with real mailboxes: see [docs/phases/phase-2.md](docs/phases/phase-2.md).
 
 ## Design documents
 
@@ -17,16 +17,17 @@ A central place to connect every company mailbox (Gmail / Google Workspace, Micr
 
 ## Stack
 
-Next.js + React + TypeScript + Tailwind · NestJS · PostgreSQL + Prisma · Redis + BullMQ · socket.io · Gmail API · Microsoft Graph · imapflow / nodemailer · OpenAI API · S3-compatible storage.
+Next.js + React + TypeScript + Tailwind · NestJS · PostgreSQL + Prisma · pg-boss (jobs on PostgreSQL) · socket.io · Gmail API · Microsoft Graph · imapflow / nodemailer · OpenAI API · S3-compatible storage.
 
 ## Repository
 
 ```
-apps/api        NestJS API (auth, users, roles, org, audit)
+apps/api        NestJS API (auth, users, roles, org, audit, mailboxes) + worker (src/worker.ts)
 apps/web        Next.js app (sign-in + admin screens)
 packages/db     Prisma schema, migrations, seed
 packages/shared Permission catalogue, role matrix, validation schemas, API types
 packages/crypto Envelope encryption, TOTP, tokens
+packages/providers Gmail + Microsoft Graph clients, mailbox OAuth, message parsing
 tools/localdb   Real PostgreSQL 17 for dev/tests without Docker
 render.yaml     Render Blueprint
 ```

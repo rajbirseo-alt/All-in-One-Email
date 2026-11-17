@@ -1,9 +1,13 @@
-# Render Blueprint — SEO Discovery Unified Email CRM (Phase 1: web + API + PostgreSQL).
+# Render Blueprint — SEO Discovery Unified Email CRM (web + API + worker + PostgreSQL).
 # Schema: https://render.com/schema/render.yaml.json
 #
 # Topology: browsers reach only `crm-web`. It proxies /api/* to `crm-api`, a private
 # service on Render's private network, so session cookies stay first-party and the API is
-# never exposed directly. Workers and Key Value (Redis) are added in Phase 2.
+# never exposed directly. Provider webhooks also arrive through crm-web.
+#
+# crm-worker runs mailbox sync, push renewal and the retention purge. Its job queue lives in
+# PostgreSQL (pg-boss), so no Redis / Key Value service is needed. It reads its secrets from
+# crm-api so both always use the same ENCRYPTION_KEYS (they decrypt the same mailbox tokens).
 #
 # Secrets marked `sync: false` are entered in the Render Dashboard on first deploy.
 
@@ -66,6 +70,104 @@ projects:
                 sync: false
               - key: MICROSOFT_TENANT_ID
                 sync: false
+              # Mailboxes (Phase 2)
+              - key: MAIL_INITIAL_SYNC_DAYS
+                value: "30"
+              - key: MAIL_RETENTION_DAYS # decided: mail purged 120 days after disconnect
+                value: "120"
+              - key: GMAIL_PUBSUB_TOPIC # optional, enables Gmail push: projects/<project>/topics/gmail-push
+                sync: false
+              - key: GMAIL_PUSH_SERVICE_ACCOUNT # service account set on the Pub/Sub push subscription
+                sync: false
+
+          - type: worker
+            name: crm-worker
+            runtime: node
+            plan: starter
+            region: singapore
+            buildCommand: npm ci --include=dev && npm run build:api
+            startCommand: node apps/api/dist/worker.js
+            autoDeployTrigger: commit
+            maxShutdownDelaySeconds: 60 # lets a running sync finish on deploy
+            envVars:
+              - key: NODE_VERSION
+                value: "24"
+              - key: NODE_ENV
+                value: production
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: crm-db
+                  property: connectionString
+              - key: APP_URL
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: APP_URL
+              - key: ALLOWED_LOGIN_DOMAINS
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: ALLOWED_LOGIN_DOMAINS
+              - key: SESSION_SECRET
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: SESSION_SECRET
+              - key: ENCRYPTION_KEYS
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: ENCRYPTION_KEYS
+              - key: PERSONAL_ACCOUNT_LOGIN
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: PERSONAL_ACCOUNT_LOGIN
+              - key: GOOGLE_CLIENT_ID
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: GOOGLE_CLIENT_ID
+              - key: GOOGLE_CLIENT_SECRET
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: GOOGLE_CLIENT_SECRET
+              - key: MICROSOFT_CLIENT_ID
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: MICROSOFT_CLIENT_ID
+              - key: MICROSOFT_CLIENT_SECRET
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: MICROSOFT_CLIENT_SECRET
+              - key: MICROSOFT_TENANT_ID
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: MICROSOFT_TENANT_ID
+              - key: MAIL_INITIAL_SYNC_DAYS
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: MAIL_INITIAL_SYNC_DAYS
+              - key: MAIL_RETENTION_DAYS
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: MAIL_RETENTION_DAYS
+              - key: GMAIL_PUBSUB_TOPIC
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: GMAIL_PUBSUB_TOPIC
+              - key: GMAIL_PUSH_SERVICE_ACCOUNT
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: GMAIL_PUSH_SERVICE_ACCOUNT
 
           - type: web
             name: crm-web

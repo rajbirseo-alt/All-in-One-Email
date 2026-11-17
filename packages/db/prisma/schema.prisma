@@ -314,6 +314,7 @@ model EmailAccount {
   disconnectedAt      DateTime?
   // Data-retention: content purge scheduled after disconnect (see docs/06)
   purgeAfter          DateTime?
+  purgedAt            DateTime? // set by the retention job once mail content was deleted
 
   department    Department?                @relation(fields: [departmentId], references: [id])
   connectedBy   User                       @relation("AccountConnectedBy", fields: [connectedById], references: [id])
@@ -601,6 +602,7 @@ model EmailMessage {
   hasAttachments    Boolean                  @default(false)
   isRead            Boolean                  @default(false)
   isDraft           Boolean                  @default(false)
+  isStarred         Boolean                  @default(false) // Gmail STARRED label / Outlook flag
   sentAt            DateTime?
   receivedAt        DateTime
   sentByUserId      String? // employee who sent it through the CRM
