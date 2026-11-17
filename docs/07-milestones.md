@@ -1,0 +1,27 @@
+# 07 — Development Milestones
+
+Each phase ends with three things: its migrations merged, its tests green in CI, the real-account checks from 06 §6 run where they apply, and a short "what works / how to verify" note in `docs/phases/phase-N.md`. A feature ships to the UI only when its backend is done (no placeholders).
+
+| # | Phase | Deliverables | Exit criteria | Needs from SEO Discovery |
+|---|---|---|---|---|
+| 0 ◐ | Foundations | **Done:** npm-workspaces monorepo, env validation (zod, fails fast), JSON logging in production, `npm run db:local` (real PostgreSQL 17, no Docker), Render blueprint. **Open:** CI pipeline (needs a Git host), lint config, Sentry error tracking, Redis/object storage (arrive with Phase 2) | Build + all tests green locally ✅; CI green ⏳ | Git host (GitHub/GitLab), domain |
+| 1 ✅ | Auth, employees, permissions, DB | Prisma migrations incl. raw SQL (full-text search, append-only audit trigger, UTC clock); RLS policies ship with the conversation tables in Phase 3; seed roles and permissions; SSO + password + TOTP; sessions; users/roles/departments/teams CRUD; AccessPolicy; audit writer; admin UI for these | Auth test matrix passes for all 8 roles; audit rows for every mutation | Google Workspace / Entra admin to create the login OAuth apps; list of departments and employees |
+| 2 | Gmail + Microsoft | Account connect/reconnect/disconnect, encrypted credentials (KMS), folder discovery, initial + incremental sync, Pub/Sub + Graph subscriptions with renewal, fallback polling, health screen, sync logs | 06 §6 checklist passed on ≥2 real Gmail/Workspace and ≥2 real M365 mailboxes | Real test mailboxes; GCP project + Pub/Sub; Entra app consent; KMS |
+| 3 | Unified inbox + email actions | Three-column UI, views + filters, search, thread view (sanitised HTML), compose/reply/reply-all/forward, drafts autosave, attachments, signatures, templates, flags (read/star/archive/spam/snooze), send queue, collision check, WS updates | Replies thread correctly at the recipient for Gmail + Outlook; attachment checksums match | — |
+| 4 | IMAP/SMTP | IMAP adapter, connection test UI + presets, IDLE supervisor, SMTP send + APPEND to Sent | Checklist passed on ≥2 real custom-domain hosts (e.g. the company's cPanel/Zoho host) | Credentials for test custom-domain mailboxes |
+| 5 | Assignment + team | Manual/bulk assign, rules engine + builder + dry-run, round-robin/least-loaded, assignment history, notes + mentions, shares, tags, presence | sales@/accounts@/hr@ rules route correctly in a live test; concurrency test (10 simultaneous assigns) consistent | The real routing rules |
+| 6 | Status, notifications, SLA | Status state machine + history, re-assessment on new mail, in-app + Web Push notifications + preferences, business calendars/holidays, SLA policies/steps, overdue views, escalation | Time-travel tests for SLA (weekends, holidays, timezone); push received on desktop + Android | Working hours, holidays, SLA targets per department |
+| 7 | Contacts + leads | Auto contact match/create, companies by domain (free-mail excluded), duplicate detection + merge preview, lead pipeline, tasks, lead routing | Merge is reversible by admin; lead flow end-to-end from a real enquiry | Lead stages and sales team roster |
+| 8 | AI + automation | OpenAI integration (summary, category, sentiment, urgency, lead detection, follow-up, suggest reply, rewrite), insight cache, AI → draft only; automation engine + admin UI + run log; absence reassignment | Test proving no code path sends AI or automation output without a human send; evaluation set of ~200 real (consented) emails for categorisation accuracy | OpenAI org + DPA; approval of what mail content may go to OpenAI |
+| 9 | Analytics | Aggregation jobs (hourly rollups), CMO/MD/Employee dashboards, date ranges, CSV export | Dashboard numbers reconcile with direct SQL on a fixed dataset | Definitions sign-off (e.g. "response time" in business vs. clock hours) |
+| 10 | Hardening + production | Pen-test fixes, rate limits tuned, load test (e.g. 50 mailboxes × 2k mails/day, 100 concurrent users), backups + restore drill, runbooks, monitoring dashboards and alerts, production deploy | Restore drill succeeds; load test SLOs met (inbox list p95 < 300ms, new mail visible < 60s); acceptance criteria 1–18 signed off | Production cloud account, DNS |
+
+## Decisions (recorded 2026-11-16)
+
+| Topic | Decision |
+|---|---|
+| Hosting | **Render**, Singapore region: `crm-web` (public), `crm-api` (private service), managed PostgreSQL 17. See [render.yaml](../render.yaml). Workers and Key Value arrive in Phase 2. Locally, `npm run db:local` runs a real PostgreSQL 17 without Docker. |
+| Employee login | *Confirmed 2026-11-17:* Google **and** Microsoft sign-in (each switched on by its credentials) plus password login (`PASSWORD_LOGIN_ENABLED`). **Personal accounts allowed** for invited employees: Gmail and personal Microsoft (Outlook.com/Hotmail/Live), via `PERSONAL_ACCOUNT_LOGIN`. TOTP is mandatory for Super Admin, MD and anyone holding `account.manage`, `role.manage` or `user.manage`. |
+| Mailboxes | Google Workspace, Microsoft 365, **and personal @gmail.com**. Consumer Gmail means Google restricted-scope verification plus a CASA assessment before Phase 2 can go beyond 100 test users. Start that application early. |
+| AI | Email content may be sent to OpenAI. Excluding specific mailboxes stays configurable (Phase 8). |
+| Retention | Mail purged **120 days** after a mailbox is disconnected. Audit logs kept **7 years**. |

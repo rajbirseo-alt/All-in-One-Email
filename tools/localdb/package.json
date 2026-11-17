@@ -1,0 +1,9 @@
+{
+  "name": "@crm/localdb",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Runs a real PostgreSQL 17 locally (no Docker) for development and tests.",
+  "main": "index.js",
+  "scripts": { "start": "node start.js" },
+  "dependencies": { "embedded-postgres": "17.6.0-beta.15" }
+}

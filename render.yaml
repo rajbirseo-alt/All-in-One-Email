@@ -1,0 +1,89 @@
+# Render Blueprint — SEO Discovery Unified Email CRM (Phase 1: web + API + PostgreSQL).
+# Schema: https://render.com/schema/render.yaml.json
+#
+# Topology: browsers reach only `crm-web`. It proxies /api/* to `crm-api`, a private
+# service on Render's private network, so session cookies stay first-party and the API is
+# never exposed directly. Workers and Key Value (Redis) are added in Phase 2.
+#
+# Secrets marked `sync: false` are entered in the Render Dashboard on first deploy.
+
+projects:
+  - name: seo-discovery-crm
+    environments:
+      - name: production
+        databases:
+          - name: crm-db
+            plan: basic-1gb
+            region: singapore # immutable — closest Render region to India
+            postgresMajorVersion: "17" # immutable
+            databaseName: crm # immutable
+            user: crm # immutable
+            ipAllowList: [] # private network only
+
+        services:
+          - type: pserv
+            name: crm-api
+            runtime: node
+            plan: starter
+            region: singapore
+            buildCommand: npm ci --include=dev && npm run build:api
+            # Applies migrations and the idempotent role/permission seed before each rollout.
+            preDeployCommand: node node_modules/prisma/build/index.js migrate deploy --schema packages/db/prisma/schema.prisma && node packages/db/dist/seed.js
+            startCommand: node apps/api/dist/main.js
+            autoDeployTrigger: commit
+            envVars:
+              - key: NODE_VERSION
+                value: "24"
+              - key: NODE_ENV
+                value: production
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: crm-db
+                  property: connectionString
+              - key: APP_URL # public https origin of crm-web, e.g. https://crm.seodiscovery.com
+                sync: false
+              - key: ALLOWED_LOGIN_DOMAINS # e.g. seodiscovery.com
+                sync: false
+              - key: SESSION_SECRET
+                generateValue: true
+              - key: ENCRYPTION_KEYS # random 256-bit base64 = master key version 1. BACK THIS UP: losing it makes stored secrets unreadable.
+                generateValue: true
+              - key: PASSWORD_LOGIN_ENABLED
+                value: "true"
+              # Invited employees may also use Gmail / personal Microsoft accounts.
+              - key: PERSONAL_ACCOUNT_LOGIN
+                value: "true"
+              # Render load balancer → crm-web (Next.js proxy) → crm-api
+              - key: TRUST_PROXY_HOPS
+                value: "2"
+              - key: GOOGLE_CLIENT_ID
+                sync: false
+              - key: GOOGLE_CLIENT_SECRET
+                sync: false
+              - key: MICROSOFT_CLIENT_ID
+                sync: false
+              - key: MICROSOFT_CLIENT_SECRET
+                sync: false
+              - key: MICROSOFT_TENANT_ID
+                sync: false
+
+          - type: web
+            name: crm-web
+            runtime: node
+            plan: starter
+            region: singapore
+            buildCommand: npm ci --include=dev && npm run build:web
+            startCommand: npm run start -w @crm/web
+            healthCheckPath: /login
+            autoDeployTrigger: commit
+            envVars:
+              - key: NODE_VERSION
+                value: "24"
+              - key: NODE_ENV
+                value: production
+              # host:port of the private API; the Next.js config adds http://
+              - key: API_INTERNAL_URL
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  property: hostport

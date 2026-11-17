@@ -1,0 +1,35 @@
+{
+  "name": "seo-discovery-email-crm",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "tools/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "allowScripts": {
+    "@embedded-postgres/windows-x64@17.6.0-beta.15": true,
+    "@prisma/client@6.19.0": true,
+    "@prisma/engines@6.19.0": true,
+    "prisma@6.19.0": true,
+    "esbuild@0.28.2": true,
+    "@swc/core@1.16.22": true
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "~5.9.0",
+    "vitest": "^3.2.7"
+  },
+  "scripts": {
+    "db:local": "npm run start -w @crm/localdb",
+    "build": "npm run build -w @crm/shared && npm run build -w @crm/crypto && npm run generate -w @crm/db && npm run build -w @crm/db && npm run build -w @crm/api && npm run build -w @crm/web",
+    "test": "npm run build -w @crm/shared && npm run build -w @crm/crypto && npm run build -w @crm/db && npm test -w @crm/shared && npm test -w @crm/crypto && npm test -w @crm/api",
+    "db:migrate": "node --env-file=.env node_modules/prisma/build/index.js migrate deploy --schema packages/db/prisma/schema.prisma",
+    "db:seed": "node --env-file=.env packages/db/dist/seed.js",
+    "build:api": "npm run build -w @crm/shared && npm run build -w @crm/crypto && npm run generate -w @crm/db && npm run build -w @crm/db && npm run build -w @crm/api",
+    "build:web": "npm run build -w @crm/shared && npm run build -w @crm/web"
+  }
+}
