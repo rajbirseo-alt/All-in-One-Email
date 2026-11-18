@@ -8,10 +8,14 @@ import { Errors } from '../common/errors';
 import type { RequestContext } from '../common/request-context';
 import { PrismaService } from '../prisma/prisma.service';
 import { sanitizeEmailHtml, textToHtml } from './email-html';
+import { EventsHub } from '../events/events.service';
 
 const listInclude = {
   emailAccount: { select: { id: true, emailAddress: true, displayName: true, provider: true } },
   assignee: { select: { id: true, name: true } },
+  team: { select: { id: true, name: true } },
+  department: { select: { id: true, name: true } },
+  tags: { select: { tag: { select: { id: true, name: true, color: true } } }, orderBy: { createdAt: 'asc' } },
   messages: {
     orderBy: { receivedAt: 'desc' },
     take: 1,
@@ -38,6 +42,7 @@ export class ThreadsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly access: AccessPolicy,
+    private readonly hub: EventsHub,
   ) {}
 
   /** Conditions of each sidebar view. Spam and trash only appear in their own views. */
@@ -95,6 +100,8 @@ export class ThreadsService {
     if (q.dateFrom) and.push({ lastMessageAt: { gte: q.dateFrom } });
     if (q.dateTo) and.push({ lastMessageAt: { lte: q.dateTo } });
     if (q.hasAttachments) and.push({ hasAttachments: q.hasAttachments === 'true' });
+    if (q.tagId?.length) and.push({ tags: { some: { tagId: { in: q.tagId } } } });
+    if (q.teamId) and.push({ teamId: q.teamId });
     if (q.q) {
       const ids = await this.searchThreadIds(q.q);
       and.push({
@@ -144,6 +151,9 @@ export class ThreadsService {
       priority: r.priority,
       account: r.emailAccount,
       assignee: r.assignee,
+      team: r.team,
+      department: r.department,
+      tags: r.tags.map((t) => t.tag),
       from: m ? { address: m.fromAddress, name: m.fromName } : fallback,
       messageCount: r.messageCount,
       unreadCount: r.unreadCount,
@@ -222,6 +232,10 @@ export class ThreadsService {
       version: t.version,
       messages: views,
       canReply: await this.access.canReply(ctx, t),
+      canAssign: !!ctx.permissions['conversation.assign'] && (await this.prisma.emailThread.count({ where: { AND: [{ id }, await this.access.threadWhere(ctx, 'conversation.assign')] } })) > 0,
+      canShare: !!ctx.permissions['conversation.share'] && (await this.prisma.emailThread.count({ where: { AND: [{ id }, await this.access.threadWhere(ctx, 'conversation.share')] } })) > 0,
+      shares: (await this.prisma.threadShare.findMany({ where: { threadId: id }, include: { user: { select: { id: true, name: true } } } })).map((s) => ({ user: s.user, canReply: s.canReply })),
+      presence: this.hub.presenceFor(id).filter((p) => p.userId !== ctx.userId),
     };
   }
 }

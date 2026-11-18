@@ -36,6 +36,12 @@ import { MailboxController } from './mail/mailbox.controller';
 import { WebhooksController } from './mail/webhooks.controller';
 import { EventsHub, EventsPublisher } from './events/events.service';
 import { EventsController } from './events/events.controller';
+import { AccessPolicy as AccessPolicyForMail } from './access/access-policy.service';
+import { AssignmentService } from './assignment/assignment.service';
+import { RoutingService } from './assignment/routing.service';
+import { RulesService } from './assignment/rules.service';
+import { CollabService } from './assignment/collab.service';
+import { AssignmentController } from './assignment/assignment.controller';
 import { ThreadsController } from './threads/threads.controller';
 import { ThreadsService } from './threads/threads.service';
 import { AttachmentsService } from './threads/attachments.service';
@@ -49,6 +55,9 @@ export function mailProviders(cfg: AppConfig, mailEndpoints?: MailEndpoints) {
   return [
     { provide: MAIL_ENDPOINTS, useFactory: () => mailEndpoints ?? buildMailEndpoints(cfg) },
     EventsPublisher,
+    AccessPolicyForMail,
+    AssignmentService,
+    RoutingService,
     CredentialService,
     IngestService,
     SyncService,
@@ -71,7 +80,7 @@ export class AppModule {
     return {
       module: AppModule,
       imports: [ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 300 }])],
-      controllers: [AuthController, UsersController, RolesController, OrgController, AuditController, HealthController, MailboxController, WebhooksController, ThreadsController, ComposeController, EventsController],
+      controllers: [AuthController, UsersController, RolesController, OrgController, AuditController, HealthController, MailboxController, WebhooksController, AssignmentController, ThreadsController, ComposeController, EventsController],
       providers: [
         { provide: APP_CONFIG, useValue: cfg },
         { provide: SSO_PROVIDERS, useFactory: () => opts.ssoProviders ?? buildSsoProviders(cfg) },
@@ -96,6 +105,8 @@ export class AppModule {
         ThreadActionsService,
         DraftsService,
         EventsHub,
+        RulesService,
+        CollabService,
         SignaturesService,
         TemplatesService,
         // Order matters: rate-limit first, then authentication/authorisation.

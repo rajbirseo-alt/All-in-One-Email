@@ -193,6 +193,9 @@ export interface ThreadListItem {
   priority: string;
   account: { id: string; emailAddress: string; displayName: string | null; provider: MailProviderKey };
   assignee: { id: string; name: string } | null;
+  team: { id: string; name: string } | null;
+  department: { id: string; name: string } | null;
+  tags: TagView[];
   /** Sender of the latest inbound message (or of the latest message). */
   from: Participant | null;
   messageCount: number;
@@ -241,6 +244,10 @@ export interface ThreadDetail extends ThreadListItem {
   version: number;
   messages: MessageView[];
   canReply: boolean;
+  canAssign: boolean;
+  canShare: boolean;
+  shares: { user: { id: string; name: string }; canReply: boolean }[];
+  presence: PresenceEntry[];
 }
 
 export type ThreadCounts = Record<string, number>;
@@ -286,4 +293,75 @@ export interface TemplateView {
   sharing: 'private' | 'department' | 'company';
   owner: { id: string; name: string };
   canEdit: boolean;
+}
+
+// ── Assignment & collaboration (Phase 5) ──
+export interface TagView {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export interface NoteView {
+  id: string;
+  author: { id: string; name: string };
+  /** Plain text; mentions are written as @[userId] and listed in `mentions`. */
+  body: string;
+  mentions: { id: string; name: string }[];
+  createdAt: string;
+  editedAt: string | null;
+  canEdit: boolean;
+}
+
+export interface AssignmentEntry {
+  id: string;
+  assignee: { id: string; name: string } | null;
+  team: { id: string; name: string } | null;
+  department: { id: string; name: string } | null;
+  assignedBy: { id: string; name: string } | null;
+  method: string;
+  rule: { id: string; name: string } | null;
+  reason: string | null;
+  createdAt: string;
+  endedAt: string | null;
+}
+
+export interface AssigneeOptions {
+  users: { id: string; name: string; email: string; isAbsent: boolean }[];
+  teams: { id: string; name: string; departmentId: string }[];
+  departments: { id: string; name: string }[];
+}
+
+export interface PresenceEntry {
+  userId: string;
+  name: string;
+  state: 'viewing' | 'composing';
+}
+
+export interface AssignmentRuleView {
+  id: string;
+  name: string;
+  position: number;
+  isEnabled: boolean;
+  conditions: { match: 'all' | 'any'; conditions: { field: string; op: string; value: string }[] };
+  targetType: 'USER' | 'TEAM' | 'DEPARTMENT';
+  targetUser: { id: string; name: string } | null;
+  team: { id: string; name: string } | null;
+  department: { id: string; name: string } | null;
+  strategy: 'DIRECT' | 'ROUND_ROBIN' | 'LEAST_LOADED';
+  setPriority: string | null;
+  canEdit: boolean;
+}
+
+export interface RuleTestResult {
+  rule: { id: string; name: string } | null;
+  /** Who would receive it now; null for a queue (team/department) or no match. */
+  wouldAssignTo: { id: string; name: string } | null;
+  queue: { team: { id: string; name: string } | null; department: { id: string; name: string } | null };
+  checked: { id: string; name: string; matched: boolean }[];
+}
+
+export interface BulkResult {
+  done: number;
+  failed: { id: string; code: string }[];
 }

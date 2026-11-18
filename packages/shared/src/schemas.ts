@@ -183,6 +183,8 @@ export const threadListQuery = z.object({
   dateFrom: z.coerce.date().optional(),
   dateTo: z.coerce.date().optional(),
   hasAttachments: z.enum(['true', 'false']).optional(),
+  tagId: many(id),
+  teamId: id.optional(),
   cursor: z.string().max(200).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
@@ -234,4 +236,53 @@ export const templateSchema = z.object({
   bodyHtml: z.string().max(200_000),
   /** private (only me) · department (my department) · company (everyone; needs conversation.read ALL). */
   sharing: z.enum(['private', 'department', 'company']).default('private'),
+});
+
+// ── Assignment & collaboration (Phase 5) ──
+export const assignSchema = z
+  .object({ assigneeId: id.nullable().optional(), teamId: id.nullable().optional(), departmentId: id.nullable().optional(), reason: z.string().trim().max(500).optional() })
+  .refine((v) => !!(v.assigneeId || v.teamId || v.departmentId), 'Choose a person, team or department');
+
+export const RULE_FIELDS = ['mailbox', 'from', 'fromDomain', 'to', 'subject', 'body'] as const;
+export const RULE_OPS = ['is', 'contains', 'startsWith', 'endsWith', 'notContains'] as const;
+export const ruleConditionsSchema = z.object({
+  match: z.enum(['all', 'any']).default('all'),
+  conditions: z.array(z.object({ field: z.enum(RULE_FIELDS), op: z.enum(RULE_OPS), value: z.string().trim().min(1).max(500) })).min(1).max(20),
+});
+export const assignmentRuleSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120),
+    isEnabled: z.boolean().default(true),
+    conditions: ruleConditionsSchema,
+    targetType: z.enum(['USER', 'TEAM', 'DEPARTMENT']),
+    targetUserId: id.nullable().optional(),
+    teamId: id.nullable().optional(),
+    departmentId: id.nullable().optional(),
+    strategy: z.enum(['DIRECT', 'ROUND_ROBIN', 'LEAST_LOADED']).default('DIRECT'),
+    setPriority: z.enum(PRIORITIES).nullable().optional(),
+  })
+  .refine(
+    (r) => (r.targetType === 'USER' ? !!r.targetUserId && r.strategy === 'DIRECT' : r.targetType === 'TEAM' ? !!r.teamId : !!r.departmentId),
+    'Choose the target that matches the rule type (a person is always assigned directly)',
+  );
+export const ruleOrderSchema = z.object({ ids: z.array(id).min(1).max(500) });
+export const ruleTestSchema = z
+  .object({
+    threadId: id.optional(),
+    sample: z.object({ accountId: id, from: z.string().max(320), to: z.string().max(2000).default(''), subject: z.string().max(998).default(''), body: z.string().max(20000).default('') }).optional(),
+  })
+  .refine((v) => !!v.threadId !== !!v.sample, 'Give either a conversation or a sample message');
+
+export const noteSchema = z.object({ body: z.string().trim().min(1).max(10000) });
+export const shareSchema = z.object({ canReply: z.boolean().default(false) });
+export const tagSchema = z.object({ name: z.string().trim().min(1).max(40), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default('#64748b') });
+export const presenceSchema = z.object({ state: z.enum(['viewing', 'composing', 'left']) });
+export const BULK_ACTIONS = ['assign', 'unassign', 'read', 'unread', 'archive', 'spam', 'star', 'tag', 'untag'] as const;
+export const bulkSchema = z.object({
+  threadIds: z.array(id).min(1).max(500),
+  action: z.enum(BULK_ACTIONS),
+  assigneeId: id.nullable().optional(),
+  teamId: id.nullable().optional(),
+  departmentId: id.nullable().optional(),
+  tagId: id.optional(),
 });

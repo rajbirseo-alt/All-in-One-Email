@@ -8,6 +8,17 @@ import { APP_CONFIG, type AppConfig } from '../config/config';
 import { PrismaService } from '../prisma/prisma.service';
 
 export const EVENTS_CHANNEL = 'crm_events';
+export const PRESENCE_CHANNEL = 'crm_presence';
+/** Presence older than this is dropped (clients refresh every ~30 s). */
+const PRESENCE_TTL_MS = 75_000;
+
+interface PresenceNotice {
+  threadId: string;
+  userId: string;
+  name: string;
+  state: 'viewing' | 'composing' | 'left';
+  at: number;
+}
 /** Keeps each NOTIFY payload well under PostgreSQL's 8000-byte limit. */
 const IDS_PER_NOTIFY = 100;
 
@@ -61,9 +72,10 @@ export class EventsHub implements OnModuleDestroy {
     this.listener ??= (async () => {
       const client = new Client({ connectionString: this.cfg.DATABASE_URL });
       client.on('notification', (n) => {
-        if (n.channel !== EVENTS_CHANNEL || !n.payload) return;
+        if (!n.payload) return;
         try {
-          void this.dispatch(JSON.parse(n.payload) as ThreadEvent);
+          if (n.channel === EVENTS_CHANNEL) void this.dispatch(JSON.parse(n.payload) as ThreadEvent);
+          else if (n.channel === PRESENCE_CHANNEL) void this.onPresence(JSON.parse(n.payload) as PresenceNotice);
         } catch {
           /* ignore malformed */
         }
@@ -74,9 +86,42 @@ export class EventsHub implements OnModuleDestroy {
       });
       await client.connect();
       await client.query(`LISTEN ${EVENTS_CHANNEL}`);
+      await client.query(`LISTEN ${PRESENCE_CHANNEL}`);
       return client;
     })();
     return this.listener;
+  }
+
+  // ───────────── presence ("Priya is replying…") ─────────────
+
+  /** threadId → userId → state. Fed by NOTIFY, so every API instance has the same view. */
+  private readonly presence = new Map<string, Map<string, { name: string; state: 'viewing' | 'composing'; at: number }>>();
+
+  /** Announces that a user is viewing/composing in a thread (clients repeat it every ~30 s). */
+  async publishPresence(threadId: string, userId: string, name: string, state: 'viewing' | 'composing' | 'left') {
+    await this.listen();
+    const notice: PresenceNotice = { threadId, userId, name, state, at: Date.now() };
+    await this.prisma.$executeRaw(Prisma.sql`SELECT pg_notify(${PRESENCE_CHANNEL}, ${JSON.stringify(notice)})`);
+  }
+
+  presenceFor(threadId: string): { userId: string; name: string; state: 'viewing' | 'composing' }[] {
+    const now = Date.now();
+    const m = this.presence.get(threadId);
+    if (!m) return [];
+    for (const [u, p] of m) if (now - p.at > PRESENCE_TTL_MS) m.delete(u);
+    return [...m].map(([userId, p]) => ({ userId, name: p.name, state: p.state }));
+  }
+
+  private async onPresence(n: PresenceNotice) {
+    let m = this.presence.get(n.threadId);
+    if (!m) this.presence.set(n.threadId, (m = new Map()));
+    if (n.state === 'left') m.delete(n.userId);
+    else m.set(n.userId, { name: n.name, state: n.state, at: n.at });
+    const list = this.presenceFor(n.threadId);
+    for (const s of this.subscribers) {
+      const ok = await this.prisma.emailThread.count({ where: { AND: [{ id: n.threadId }, await this.access.threadWhere(s.ctx)] } });
+      if (ok) s.res.write(`event: presence\ndata: ${JSON.stringify({ threadId: n.threadId, users: list })}\n\n`);
+    }
   }
 
   async subscribe(ctx: RequestContext, res: Response, stillValid: () => Promise<boolean>) {

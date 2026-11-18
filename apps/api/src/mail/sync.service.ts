@@ -15,6 +15,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CredentialService } from './credential.service';
 import { IngestService, type FolderRef, type IngestResult, type IngestTarget } from './ingest.service';
 import { MAIL_ENDPOINTS, type MailEndpoints } from './mail-endpoints';
+import { RoutingService } from '../assignment/routing.service';
 
 /** Consecutive failed runs before the account is shown as ERROR. */
 export const ERROR_THRESHOLD = 5;
@@ -56,6 +57,7 @@ export class SyncService {
     private readonly ingest: IngestService,
     private readonly audit: AuditService,
     @Inject(MAIL_ENDPOINTS) private readonly endpoints: MailEndpoints,
+    private readonly routing: RoutingService,
   ) {}
 
   gmail(accountId: string) {
@@ -81,6 +83,8 @@ export class SyncService {
       if (account.provider === 'GMAIL') await this.syncGmail(account, initial, kind, result);
       else await this.syncGraph(account, initial, result);
       await this.ingest.refreshThreads(result.threadIds);
+      // New conversations go through the assignment rules (history imported at connect does not).
+      await this.routing.routeNew(result.threadIds).catch((e: Error) => this.log.error(`Routing failed: ${e.message}`));
 
       await this.prisma.$transaction([
         this.prisma.syncLog.update({
