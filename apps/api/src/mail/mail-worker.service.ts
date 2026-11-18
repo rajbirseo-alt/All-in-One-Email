@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { FlagPushService } from './flag-push.service';
-import { QUEUES, QueueService, type FlagJob, type SyncJob } from './queue.service';
+import { QUEUES, QueueService, type FlagJob, type SendJob, type SyncJob } from './queue.service';
+import { SendService } from '../compose/send.service';
 import { RetentionService } from './retention.service';
 import { SubscriptionService } from './subscription.service';
 import { SyncService } from './sync.service';
@@ -27,6 +28,7 @@ export class MailWorkerService {
     private readonly retention: RetentionService,
     private readonly prisma: PrismaService,
     private readonly flags: FlagPushService,
+    private readonly sender: SendService,
   ) {}
 
   /** One sync job; after a successful run, push subscriptions are created or renewed if due. */
@@ -52,6 +54,9 @@ export class MailWorkerService {
     });
     await boss.work<FlagJob>(QUEUES.flags, async (jobs) => {
       for (const job of jobs) await this.flags.push(job.data);
+    });
+    await boss.work<SendJob>(QUEUES.send, { localConcurrency: 2 }, async (jobs) => {
+      for (const job of jobs) await this.sender.send(job.data);
     });
     await boss.work(QUEUES.poll, async () => {
       await this.enqueuePoll();

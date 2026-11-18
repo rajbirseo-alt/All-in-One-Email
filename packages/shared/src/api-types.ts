@@ -244,3 +244,46 @@ export interface ThreadDetail extends ThreadListItem {
 }
 
 export type ThreadCounts = Record<string, number>;
+
+// ── Compose & send (Phase 3) ──
+export interface DraftView {
+  id: string;
+  mode: 'NEW' | 'REPLY' | 'REPLY_ALL' | 'FORWARD';
+  source: 'USER' | 'AI';
+  status: 'EDITING' | 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED';
+  emailAccount: { id: string; emailAddress: string; displayName: string | null };
+  threadId: string | null;
+  to: Participant[];
+  cc: Participant[];
+  bcc: Participant[];
+  subject: string;
+  bodyHtml: string;
+  baseThreadVersion: number | null;
+  attachments: AttachmentInfo[];
+  scheduledFor: string | null;
+  sendError: string | null;
+  updatedAt: string;
+}
+
+export interface ThreadChangedDetails {
+  currentVersion: number;
+  newMessages: { id: string; from: Participant; subject: string; snippet: string | null; receivedAt: string }[];
+}
+
+export interface SignatureView {
+  id: string;
+  name: string;
+  html: string;
+  emailAccountId: string | null;
+  isDefault: boolean;
+}
+
+export interface TemplateView {
+  id: string;
+  name: string;
+  subject: string | null;
+  bodyHtml: string;
+  sharing: 'private' | 'department' | 'company';
+  owner: { id: string; name: string };
+  canEdit: boolean;
+}

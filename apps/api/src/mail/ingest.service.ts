@@ -243,7 +243,9 @@ export class IngestService {
         const b = data[k];
         return a instanceof Date && b instanceof Date ? a.getTime() !== b.getTime() : a !== b;
       });
-      if (changed) await this.prisma.emailThread.update({ where: { id: threadId }, data: { ...data, version: { increment: 1 } } });
+      // The version (collision check) only moves when the set of messages changes, not on read/star/archive.
+      const messagesChanged = before.messageCount !== data.messageCount || before.lastMessageAt.getTime() !== data.lastMessageAt.getTime();
+      if (changed) await this.prisma.emailThread.update({ where: { id: threadId }, data: { ...data, ...(messagesChanged ? { version: { increment: 1 } } : {}) } });
     }
   }
 }

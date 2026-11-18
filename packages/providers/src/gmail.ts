@@ -91,6 +91,20 @@ export class GmailClient {
     return normalizeGmailMessage(body, acc);
   }
 
+  /** Sends a complete RFC 5322 message. `threadId` keeps it in the Gmail conversation. */
+  async send(mime: Buffer, threadId?: string | null): Promise<{ id: string; threadId: string }> {
+    const { body } = await this.http.json<{ id: string; threadId: string }>(`${this.base}/messages/send`, {
+      method: 'POST',
+      body: { raw: mime.toString('base64url'), ...(threadId ? { threadId } : {}) },
+    });
+    return body;
+  }
+
+  /** Gmail ids of messages carrying this Message-ID header (used to detect an already-sent retry). */
+  async findByMessageId(messageIdHeader: string): Promise<string[]> {
+    return (await this.listMessageIds(`rfc822msgid:${messageIdHeader.replace(/^<|>$/g, '')} in:anywhere`)).ids;
+  }
+
   /** Adds/removes labels on up to 1000 messages (read = remove UNREAD, archive = remove INBOX, …). */
   async modifyLabels(ids: string[], add: string[], remove: string[]): Promise<void> {
     for (let i = 0; i < ids.length; i += 1000) {

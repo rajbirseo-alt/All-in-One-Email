@@ -189,3 +189,49 @@ export const threadListQuery = z.object({
 export const threadDetailQuery = z.object({ images: z.enum(['true', 'false']).optional() });
 export const THREAD_ACTIONS = ['read', 'unread', 'star', 'unstar', 'archive', 'unarchive', 'spam', 'not-spam'] as const;
 export const snoozeSchema = z.object({ until: z.coerce.date().nullable() });
+
+// ── Compose & send (Phase 3) ──
+export const DRAFT_MODES = ['NEW', 'REPLY', 'REPLY_ALL', 'FORWARD'] as const;
+export const recipient = z.object({ address: email, name: z.string().trim().max(200).nullable().optional() });
+const recipients = z.array(recipient).max(100);
+
+export const createDraftSchema = z
+  .object({
+    mode: z.enum(DRAFT_MODES),
+    threadId: id.optional(),
+    /** Message being replied to / forwarded; defaults to the latest one in the thread. */
+    messageId: id.optional(),
+    /** Required for NEW. */
+    emailAccountId: id.optional(),
+  })
+  .refine((d) => (d.mode === 'NEW' ? !!d.emailAccountId : !!d.threadId), 'NEW needs emailAccountId; replies and forwards need threadId');
+
+export const updateDraftSchema = z
+  .object({
+    to: recipients.optional(),
+    cc: recipients.optional(),
+    bcc: recipients.optional(),
+    subject: z.string().max(998).optional(),
+    bodyHtml: z.string().max(2_000_000).optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, 'Nothing to update');
+
+export const sendDraftSchema = z.object({
+  /** Thread version the author last saw (collision check); omit for NEW mail. */
+  baseThreadVersion: z.number().int().min(0).optional(),
+  scheduledFor: z.coerce.date().nullable().optional(),
+});
+
+export const signatureSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  html: z.string().max(20_000),
+  emailAccountId: id.nullable().optional(),
+  isDefault: z.boolean().default(false),
+});
+export const templateSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  subject: z.string().max(998).nullable().optional(),
+  bodyHtml: z.string().max(200_000),
+  /** private (only me) · department (my department) · company (everyone; needs conversation.read ALL). */
+  sharing: z.enum(['private', 'department', 'company']).default('private'),
+});

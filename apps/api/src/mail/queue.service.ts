@@ -25,6 +25,8 @@ export interface FlagJob {
 
 export interface SendJob {
   draftId: string;
+  /** The approval this job belongs to; a cancelled and re-approved draft ignores older jobs. */
+  approvedAt: string;
 }
 
 export interface SyncJob {

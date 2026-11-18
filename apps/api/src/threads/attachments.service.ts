@@ -31,8 +31,20 @@ export class AttachmentsService {
   ) {}
 
   async download(ctx: RequestContext, id: string, wantInline: boolean): Promise<AttachmentDownload> {
-    const att = await this.prisma.attachment.findFirst({
-      where: { id, message: { thread: await this.access.threadWhere(ctx) } },
+    const visible = await this.prisma.attachment.count({ where: { id, message: { thread: await this.access.threadWhere(ctx) } } });
+    if (!visible) throw Errors.notFound('Attachment');
+    const att = await this.prisma.attachment.findUniqueOrThrow({ where: { id } });
+    const data = await this.receivedContent(id);
+    return { filename: att.filename, contentType: att.contentType, inline: wantInline && INLINE_SAFE.has(att.contentType.toLowerCase()), data };
+  }
+
+  /**
+   * Content of a RECEIVED attachment, fetched from the provider. No access check: callers check
+   * first (download) or act on a human-approved send (forwarding).
+   */
+  async receivedContent(id: string): Promise<Buffer> {
+    const att = await this.prisma.attachment.findUnique({
+      where: { id },
       include: { message: { include: { emailAccount: { select: { id: true, provider: true, status: true } } } } },
     });
     if (!att?.message) throw Errors.notFound('Attachment');
@@ -65,6 +77,6 @@ export class AttachmentsService {
     if (!att.sha256) {
       await this.prisma.attachment.update({ where: { id }, data: { sha256: createHash('sha256').update(data).digest('hex') } });
     }
-    return { filename: att.filename, contentType: att.contentType, inline: wantInline && INLINE_SAFE.has(att.contentType.toLowerCase()), data };
+    return data;
   }
 }

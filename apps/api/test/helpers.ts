@@ -66,6 +66,17 @@ export class Client {
   patch = (p: string, b: unknown) => this.send('patch', p, b);
   put = (p: string, b: unknown) => this.send('put', p, b);
   del = (p: string) => this.send('delete', p);
+
+  /** Multipart upload of one file in field "file". */
+  async upload(path: string, filename: string, content: Buffer) {
+    let r = request(this.app.getHttpServer()).post(`/api/v1${path}`).set('Origin', APP_URL);
+    if (this.cookies.size) r = r.set('Cookie', [...this.cookies].map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('; '));
+    const csrf = this.cookies.get('crm_csrf');
+    if (csrf) r = r.set('X-CSRF-Token', csrf);
+    const res = await r.attach('file', content, filename);
+    this.absorb(res);
+    return res;
+  }
 }
 
 export const prisma = new PrismaClient();

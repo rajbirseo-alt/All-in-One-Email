@@ -96,6 +96,6 @@ export class ThreadActionsService {
   async snooze(ctx: RequestContext, id: string, until: Date | null) {
     await this.visible(ctx, id, 'conversation.read');
     if (until && until.getTime() <= Date.now()) throw Errors.validation([{ path: 'until', message: 'Choose a time in the future' }]);
-    await this.prisma.emailThread.update({ where: { id }, data: { snoozedUntil: until, version: { increment: 1 } } });
+    await this.prisma.emailThread.update({ where: { id }, data: { snoozedUntil: until } });
   }
 }

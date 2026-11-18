@@ -1,4 +1,5 @@
-import { CursorExpiredError } from './errors';
+import { CursorExpiredError, TransientError } from './errors';
+import type { FetchFn } from './http';
 import type { ProviderHttp } from './http';
 import { normalizeMessageId } from './message-utils';
 import type { Address, FolderKind, NormalizedAttachment, NormalizedFolder, NormalizedMessage } from './types';
@@ -71,11 +72,13 @@ export interface DeltaPage {
 
 export class GraphClient {
   private readonly http: Pick<ProviderHttp, 'json'>;
+  private readonly rawFetch: FetchFn;
 
   constructor(
     http: ProviderHttp,
     private readonly base = GRAPH_API_BASE,
   ) {
+    this.rawFetch = http.unauthenticatedFetch;
     // Immutable ids keep a message's id stable when it moves between folders, so a move is
     // not mistaken for a delete followed by a new message.
     this.http = {
@@ -156,6 +159,78 @@ export class GraphClient {
       contentId: a.contentId ?? null,
       isInline: !!a.isInline,
     }));
+  }
+
+  // ───────── Sending (draft → attachments → send keeps Outlook conversations intact) ─────────
+
+  /** createReply / createReplyAll / createForward on a received message, or a new draft. Returns the draft id. */
+  async createDraft(parentId: string | null, kind: 'reply' | 'replyAll' | 'forward' | 'new'): Promise<string> {
+    const action = { reply: 'createReply', replyAll: 'createReplyAll', forward: 'createForward' } as const;
+    const url = kind === 'new' ? `${this.base}/me/messages` : `${this.base}/me/messages/${encodeURIComponent(parentId!)}/${action[kind]}`;
+    const { body } = await this.http.json<{ id: string }>(url, { method: 'POST', body: kind === 'new' ? { subject: '' } : {} });
+    return body.id;
+  }
+
+  async updateDraft(
+    id: string,
+    patch: { subject: string; html: string; to: Address[]; cc: Address[]; bcc: Address[]; internetMessageHeaders?: { name: string; value: string }[] },
+  ): Promise<void> {
+    const r = (list: Address[]) => list.map((a) => ({ emailAddress: { address: a.address, ...(a.name ? { name: a.name } : {}) } }));
+    await this.http.json(`${this.base}/me/messages/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: {
+        subject: patch.subject,
+        body: { contentType: 'html', content: patch.html },
+        toRecipients: r(patch.to),
+        ccRecipients: r(patch.cc),
+        bccRecipients: r(patch.bcc),
+        ...(patch.internetMessageHeaders?.length ? { internetMessageHeaders: patch.internetMessageHeaders } : {}),
+      },
+    });
+  }
+
+  /** Adds a file attachment; files over 3 MB go through an upload session as Graph requires. */
+  async addAttachment(draftId: string, file: { name: string; contentType: string; data: Buffer }): Promise<void> {
+    const base = `${this.base}/me/messages/${encodeURIComponent(draftId)}/attachments`;
+    if (file.data.length <= 3 * 1024 * 1024) {
+      await this.http.json(base, {
+        method: 'POST',
+        body: { '@odata.type': '#microsoft.graph.fileAttachment', name: file.name, contentType: file.contentType, contentBytes: file.data.toString('base64') },
+      });
+      return;
+    }
+    const { body } = await this.http.json<{ uploadUrl: string }>(`${base}/createUploadSession`, {
+      method: 'POST',
+      body: { AttachmentItem: { attachmentType: 'file', name: file.name, size: file.data.length, contentType: file.contentType } },
+    });
+    const chunk = 12 * 320 * 1024; // multiple of 320 KiB, as Graph requires
+    for (let start = 0; start < file.data.length; start += chunk) {
+      const end = Math.min(start + chunk, file.data.length);
+      // The upload URL is pre-authenticated: no bearer token may be sent to it.
+      const res = await this.rawFetch(body.uploadUrl, {
+        method: 'PUT',
+        headers: { 'content-length': String(end - start), 'content-range': `bytes ${start}-${end - 1}/${file.data.length}` },
+        body: new Uint8Array(file.data.subarray(start, end)),
+      });
+      if (!res.ok) throw new TransientError(`Attachment upload failed: HTTP ${res.status}`, res.status);
+    }
+  }
+
+  async deleteMessage(id: string): Promise<void> {
+    await this.http.json(`${this.base}/me/messages/${encodeURIComponent(id)}`, { method: 'DELETE', allow: [404] });
+  }
+
+  async sendDraft(id: string): Promise<void> {
+    await this.http.json(`${this.base}/me/messages/${encodeURIComponent(id)}/send`, { method: 'POST' });
+  }
+
+  /** Message metadata (null when it no longer exists). With immutable ids, a sent draft keeps its id in Sent Items. */
+  async messageMeta(id: string): Promise<{ conversationId: string; internetMessageId: string | null; isDraft: boolean } | null> {
+    const { status, body } = await this.http.json<{ conversationId: string; internetMessageId?: string; isDraft?: boolean }>(
+      `${this.base}/me/messages/${encodeURIComponent(id)}?$select=conversationId,internetMessageId,isDraft`,
+      { allow: [404] },
+    );
+    return status === 404 ? null : { conversationId: body.conversationId, internetMessageId: body.internetMessageId ?? null, isDraft: !!body.isDraft };
   }
 
   /** Updates read state or flag. Returns false when the message no longer exists. */

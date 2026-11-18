@@ -6,6 +6,9 @@ import { envelopeProvider } from './crypto.provider';
 import type { MailEndpoints } from './mail/mail-endpoints';
 import { MailWorkerService } from './mail/mail-worker.service';
 import { FlagPushService } from './mail/flag-push.service';
+import { AccessPolicy } from './access/access-policy.service';
+import { AttachmentsService } from './threads/attachments.service';
+import { SendService } from './compose/send.service';
 import { RetentionService } from './mail/retention.service';
 import { PrismaService } from './prisma/prisma.service';
 
@@ -23,6 +26,9 @@ export class WorkerModule {
         ...mailProviders(cfg, opts.mailEndpoints),
         RetentionService,
         FlagPushService,
+        AccessPolicy,
+        AttachmentsService,
+        SendService,
         MailWorkerService,
       ],
     };

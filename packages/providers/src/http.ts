@@ -28,6 +28,11 @@ export class ProviderHttp {
     private readonly fetchImpl: FetchFn = fetch,
   ) {}
 
+  /** Plain fetch without the bearer token (pre-authenticated upload URLs). */
+  get unauthenticatedFetch(): FetchFn {
+    return this.fetchImpl;
+  }
+
   async json<T>(url: string, opts: RequestOptions = {}): Promise<JsonResponse<T>> {
     let res = await this.send(url, opts, false);
     if (res.status === 401) res = await this.send(url, opts, true);

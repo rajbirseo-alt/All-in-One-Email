@@ -40,7 +40,20 @@ export interface GraphFakeMessage {
   received: Date;
   isRead: boolean;
   internetMessageId: string;
-  attachments?: { id: string; name: string; contentType: string; size: number }[];
+  attachments?: { id: string; name: string; contentType: string; size: number; bytes?: Buffer }[];
+  isDraft?: boolean;
+  cc?: string[];
+  bcc?: string[];
+  /** For drafts: how it was created (reply, replyAll, forward, new). */
+  createdVia?: string;
+  replyToId?: string;
+}
+
+/** Minimal header reader for the raw MIME a test sent through Gmail. */
+export function mimeHeader(raw: string, name: string): string | null {
+  const head = raw.split(/\r?\n\r?\n/)[0]!.replace(/\r?\n[ \t]+/g, ' ');
+  const m = new RegExp(`^${name}:\\s*(.*)$`, 'im').exec(head);
+  return m ? m[1]!.trim() : null;
 }
 
 type GmailHistory = { id: number; added?: string[]; deleted?: string[]; labels?: string[] };
@@ -52,6 +65,13 @@ export class FakeMail {
   readonly modifications: { mailbox: string; ids: string[]; addLabelIds: string[]; removeLabelIds: string[] }[] = [];
   readonly graphPatches: { mailbox: string; id: string; patch: unknown }[] = [];
   readonly graphMoves: { mailbox: string; id: string; destinationId: string }[] = [];
+  /** Raw MIME of every message sent through the fake Gmail. */
+  readonly gmailSent: { mailbox: string; raw: string; threadId: string | null; id: string }[] = [];
+  /** Fail the next N Gmail sends with HTTP 503 AFTER storing them (an ambiguous failure). */
+  gmailSendFailAfterAccept = 0;
+  readonly graphSent: { mailbox: string; message: GraphFakeMessage }[] = [];
+  readonly uploads = new Map<string, Buffer>();
+  readonly pendingUploads = new Map<string, { id: string; name: string; contentType: string; size: number }>();
 
   // OAuth
   /** code → identity the code was issued for. */
@@ -256,6 +276,23 @@ export class FakeMail {
       if (r.provider === 'MICROSOFT') this.refresh.delete(form.get('refresh_token')!);
       return this.send(res, 200, tokens);
     }
+    const upload = /^\/upload\/([^/]+)\/([^/]+)$/.exec(path);
+    if (upload && req.method === 'PUT') {
+      // Pre-authenticated upload URL: a bearer token must NOT be sent here.
+      if (req.headers.authorization) return this.send(res, 400, { error: { code: 'TestExpectation', message: 'no auth header on upload URLs' } });
+      const chunks: Buffer[] = [];
+      for await (const c of req) chunks.push(c as Buffer);
+      const key = `${upload[1]}/${upload[2]}`;
+      this.uploads.set(key, Buffer.concat([this.uploads.get(key) ?? Buffer.alloc(0), ...chunks]));
+      const total = Number(/\/(\d+)$/.exec(String(req.headers['content-range']))?.[1]);
+      if (this.uploads.get(key)!.length === total) {
+        const [box, draftId] = [decodeURIComponent(upload[1]!), decodeURIComponent(upload[2]!)];
+        const draft = this.graphBox(box).messages.get(draftId)!;
+        draft.attachments = [...(draft.attachments ?? []), { ...this.pendingUploads.get(key)!, bytes: this.uploads.get(key)! }];
+        return this.send(res, 201, {});
+      }
+      return this.send(res, 200, { nextExpectedRanges: [`${this.uploads.get(key)!.length}-`] });
+    }
     if (req.method === 'POST' && path === '/revoke') {
       const token = new URLSearchParams(await this.body(req)).get('token') ?? '';
       this.revoked.push(token);
@@ -315,6 +352,11 @@ export class FakeMail {
       });
     }
     if (path === '/messages') {
+      const rfc = /rfc822msgid:(\S+)/.exec(url.searchParams.get('q') ?? '')?.[1];
+      if (rfc) {
+        const hits = [...b.messages.values()].filter((m) => m.messageId.replace(/^<|>$/g, '') === rfc);
+        return this.send(res, 200, hits.length ? { messages: hits.map((m) => ({ id: m.id, threadId: m.threadId })) } : {});
+      }
       const after = Number(/after:(\d+)/.exec(url.searchParams.get('q') ?? '')?.[1] ?? 0) * 1000;
       const all = [...b.messages.values()].filter((m) => m.date.getTime() > after && !m.labelIds.includes('DRAFT') && !m.labelIds.includes('SPAM') && !m.labelIds.includes('TRASH')).sort((x, y) => y.date.getTime() - x.date.getTime());
       const start = Number(url.searchParams.get('pageToken') ?? 0);
@@ -328,6 +370,30 @@ export class FakeMail {
     if (msg && req.method === 'GET') {
       const m = b.messages.get(decodeURIComponent(msg[1]!));
       return m ? this.send(res, 200, this.gmailRaw(m, url.searchParams.get('format') ?? 'full')) : this.send(res, 404, { error: { code: 404, message: 'Not Found' } });
+    }
+    if (path === '/messages/send' && req.method === 'POST') {
+      const body = JSON.parse(await this.body(req)) as { raw: string; threadId?: string };
+      const raw = Buffer.from(body.raw, 'base64url').toString('utf8');
+      const id = `sent-${++this.seq}`;
+      const threadId = body.threadId ?? `t-${id}`;
+      b.messages.set(id, {
+        id,
+        threadId,
+        labelIds: ['SENT'],
+        from: mimeHeader(raw, 'From') ?? mailbox,
+        to: mimeHeader(raw, 'To') ?? '',
+        subject: mimeHeader(raw, 'Subject') ?? '',
+        text: 'sent',
+        date: new Date(),
+        messageId: mimeHeader(raw, 'Message-ID') ?? `<${id}@x>`,
+      });
+      b.history.push({ id: ++b.historyId, added: [id] });
+      this.gmailSent.push({ mailbox, raw, threadId: body.threadId ?? null, id });
+      if (this.gmailSendFailAfterAccept > 0) {
+        this.gmailSendFailAfterAccept--;
+        return this.send(res, 503, { error: { code: 503, message: 'Backend Error' } });
+      }
+      return this.send(res, 200, { id, threadId, labelIds: ['SENT'] });
     }
     if (path === '/messages/batchModify' && req.method === 'POST') {
       const body = JSON.parse(await this.body(req)) as { ids: string[]; addLabelIds: string[]; removeLabelIds: string[] };
@@ -426,7 +492,81 @@ export class FakeMail {
       const next = `${this.base}/graph/v1.0/me/mailFolders/${encodeURIComponent(folderId)}/messages/delta?$deltatoken=${b.changes.length}`;
       return this.send(res, 200, { value, '@odata.deltaLink': next });
     }
+    if (path === '/me/messages' && req.method === 'POST') {
+      const id = `d-${++this.seq}`;
+      b.messages.set(id, { id, conversationId: `conv-${id}`, folderId: 'F-DRAFTS', from: mailbox, to: '', subject: '', html: '', received: new Date(), isRead: true, internetMessageId: `<${id}@outlook.test>`, isDraft: true, createdVia: 'new' });
+      return this.send(res, 201, { id });
+    }
+    const create = /^\/me\/messages\/([^/]+)\/(createReply|createReplyAll|createForward)$/.exec(path);
+    if (create && req.method === 'POST') {
+      const parent = b.messages.get(decodeURIComponent(create[1]!));
+      if (!parent) return this.send(res, 404, { error: { code: 'ErrorItemNotFound', message: 'x' } });
+      const id = `d-${++this.seq}`;
+      b.messages.set(id, {
+        id,
+        conversationId: parent.conversationId,
+        folderId: 'F-DRAFTS',
+        from: mailbox,
+        to: '',
+        subject: `RE: ${parent.subject}`,
+        html: '',
+        received: new Date(),
+        isRead: true,
+        internetMessageId: `<${id}@outlook.test>`,
+        isDraft: true,
+        createdVia: create[2],
+        replyToId: parent.id,
+        // createForward carries the original attachments, like Outlook does.
+        attachments: create[2] === 'createForward' ? [...(parent.attachments ?? [])] : [],
+      });
+      return this.send(res, 201, { id });
+    }
+    const draftAtt = /^\/me\/messages\/([^/]+)\/attachments(\/createUploadSession)?$/.exec(path);
+    if (draftAtt && req.method === 'POST') {
+      const m = b.messages.get(decodeURIComponent(draftAtt[1]!));
+      if (!m?.isDraft) return this.send(res, 404, { error: { code: 'ErrorItemNotFound', message: 'x' } });
+      const body = JSON.parse(await this.body(req)) as { name?: string; contentType?: string; contentBytes?: string; AttachmentItem?: { name: string; size: number; contentType: string } };
+      if (draftAtt[2]) {
+        const key = `${encodeURIComponent(mailbox)}/${encodeURIComponent(m.id)}`;
+        const item = body.AttachmentItem!;
+        this.uploads.delete(key);
+        this.pendingUploads.set(key, { id: `att-${++this.seq}`, name: item.name, contentType: item.contentType, size: item.size });
+        return this.send(res, 201, { uploadUrl: `${this.base}/upload/${key}` });
+      }
+      const bytes = Buffer.from(body.contentBytes ?? '', 'base64');
+      m.attachments = [...(m.attachments ?? []), { id: `att-${++this.seq}`, name: body.name!, contentType: body.contentType!, size: bytes.length, bytes }];
+      return this.send(res, 201, {});
+    }
+    const sendD = /^\/me\/messages\/([^/]+)\/send$/.exec(path);
+    if (sendD && req.method === 'POST') {
+      const m = b.messages.get(decodeURIComponent(sendD[1]!));
+      if (!m?.isDraft) return this.send(res, 404, { error: { code: 'ErrorItemNotFound', message: 'x' } });
+      m.isDraft = false;
+      m.folderId = 'F-SENT';
+      m.received = new Date();
+      b.changes.push({ folderId: 'F-SENT', id: m.id, removed: false });
+      this.graphSent.push({ mailbox, message: { ...m } });
+      return this.send(res, 202);
+    }
     const one2 = /^\/me\/messages\/([^/]+)$/.exec(path);
+    if (one2 && req.method === 'GET') {
+      const m = b.messages.get(decodeURIComponent(one2[1]!));
+      return m ? this.send(res, 200, { ...this.graphRaw(m), isDraft: !!m.isDraft }) : this.send(res, 404, { error: { code: 'ErrorItemNotFound', message: 'x' } });
+    }
+    if (one2 && req.method === 'DELETE') {
+      b.messages.delete(decodeURIComponent(one2[1]!));
+      return this.send(res, 204);
+    }
+    if (one2 && req.method === 'PATCH' && b.messages.get(decodeURIComponent(one2[1]!))?.isDraft) {
+      const m = b.messages.get(decodeURIComponent(one2[1]!))!;
+      const p = JSON.parse(await this.body(req)) as { subject: string; body: { content: string }; toRecipients: { emailAddress: { address: string } }[]; ccRecipients: { emailAddress: { address: string } }[]; bccRecipients: { emailAddress: { address: string } }[] };
+      m.subject = p.subject;
+      m.html = p.body.content;
+      m.to = p.toRecipients.map((r) => r.emailAddress.address).join(', ');
+      m.cc = p.ccRecipients.map((r) => r.emailAddress.address);
+      m.bcc = p.bccRecipients.map((r) => r.emailAddress.address);
+      return this.send(res, 200, this.graphRaw(m));
+    }
     if (one2 && req.method === 'PATCH') {
       const m = b.messages.get(decodeURIComponent(one2[1]!));
       if (!m) return this.send(res, 404, { error: { code: 'ErrorItemNotFound', message: 'x' } });

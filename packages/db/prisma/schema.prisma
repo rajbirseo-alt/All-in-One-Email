@@ -659,6 +659,10 @@ model Attachment {
   isInline             Boolean    @default(false)
   storageKey           String? // object-storage key; null until downloaded (lazy fetch)
   sha256               String?
+  /// Uploaded content of a draft attachment (outbound only; inbound content stays at the provider).
+  content              Bytes?
+  /// Forwarding: the received attachment whose content is fetched from the provider at send time.
+  sourceAttachmentId   String?
   scanStatus           ScanStatus @default(PENDING)
   createdAt            DateTime   @default(now())
 
@@ -713,6 +717,10 @@ model Draft {
   sentMessageId      String?
   sendError          String?
   scheduledFor       DateTime?
+  /// Message-ID header set on the outgoing message (also used to detect an already-sent retry on Gmail).
+  messageIdHeader    String?
+  /// Graph draft created for this send (immutable id; becomes the sent message id).
+  providerDraftId    String?
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
 

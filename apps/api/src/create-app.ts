@@ -16,7 +16,7 @@ export async function createApp(cfg: AppConfig, opts: AppModuleOptions = {}): Pr
   app.disable('x-powered-by');
   app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } } }));
   app.use(cookieParser());
-  app.useBodyParser('json', { limit: '1mb' });
+  app.useBodyParser('json', { limit: '3mb' }); // draft bodies up to 2 MB; files use multipart
   app.setGlobalPrefix('api/v1');
   app.enableShutdownHooks();
   return app;
