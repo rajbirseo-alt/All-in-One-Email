@@ -2,7 +2,7 @@
 
 A central place to connect every company mailbox (Gmail / Google Workspace, Microsoft 365 / Outlook, and IMAP/SMTP custom domains), with assignment, SLA tracking, CRM contacts and leads, AI-assisted drafting and management reporting.
 
-**Status:** Phase 1 (authentication, employees, permissions, database) is complete and deployed on Render. Phase 2 (Gmail + Microsoft 365 mailboxes) and Phase 3 (unified inbox, reading, triage, reply/forward/send, live updates) are built and tested locally, and wait for verification with real mailboxes: see [phase-2.md](docs/phases/phase-2.md) and [phase-3.md](docs/phases/phase-3.md).
+**Status:** Phase 1 (authentication, employees, permissions, database) is complete and deployed on Render. Phase 2 (Gmail + Microsoft 365 mailboxes) Phase 3 (unified inbox, reading, triage, reply/forward/send, live updates) and Phase 5 (assignment, routing rules, notes, sharing, tags, presence) are built and tested locally, and wait for verification with real mailboxes: see [phase-2.md](docs/phases/phase-2.md), [phase-3.md](docs/phases/phase-3.md) and [phase-5.md](docs/phases/phase-5.md).
 
 ## Design documents
 

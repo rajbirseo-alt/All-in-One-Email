@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import type { DraftView, MailboxSummary, ThreadCounts, ThreadDetail, ThreadListItem } from '@crm/shared';
+import type { AssigneeOptions, BulkResult, DraftView, MailboxSummary, PresenceEntry, ThreadCounts, ThreadDetail, ThreadListItem } from '@crm/shared';
 import { api, ApiError } from '@/lib/api';
 import { useLoad } from '@/lib/hooks';
 import { formatAddresses, formatBytes, prefersDark, shortDate, who } from '@/lib/mail';
@@ -10,6 +10,7 @@ import { useSession } from '@/lib/session';
 import { Badge, Button, ErrorBanner, Input, Select } from '@/components/ui';
 import { Composer } from '@/components/mail/composer';
 import { MessageFrame } from '@/components/mail/message-frame';
+import { CollabPanel } from '@/components/mail/collab-panel';
 
 const VIEWS: { key: string; label: string }[] = [
   { key: 'inbox', label: 'Inbox' },
@@ -45,8 +46,12 @@ function snoozeOptions() {
 }
 
 export default function InboxPage() {
-  const { can } = useSession();
+  const { can, me } = useSession();
   const router = useRouter();
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [bulkOptions, setBulkOptions] = useState<AssigneeOptions | null>(null);
+  const [bulkNote, setBulkNote] = useState<string | null>(null);
+  const [presence, setPresence] = useState<PresenceEntry[]>([]);
   const [view, setView] = useState('inbox');
   const [accountId, setAccountId] = useState('');
   const [query, setQuery] = useState('');
@@ -111,6 +116,10 @@ export default function InboxPage() {
         if (selectedRef.current && ids.includes(selectedRef.current)) void loadDetail(selectedRef.current, false);
       }, 400);
     });
+    es.addEventListener('presence', (ev) => {
+      const p = JSON.parse((ev as MessageEvent).data) as { threadId: string; users: PresenceEntry[] };
+      if (p.threadId === selectedRef.current) setPresence(p.users.filter((u) => u.userId !== me.user.id));
+    });
     es.addEventListener('session.ended', () => {
       es.close();
       router.replace('/login');
@@ -119,7 +128,50 @@ export default function InboxPage() {
       es.close();
       if (t) clearTimeout(t);
     };
-  }, [loadList, loadDetail, counts, router]);
+  }, [loadList, loadDetail, counts, router, me.user.id]);
+
+  // Tell colleagues who is looking at / replying to the open conversation (refreshed every 30 s).
+  const composing = !!composer && !!selected;
+  useEffect(() => {
+    if (!selected) return;
+    const say = (state: string) => api(`/threads/${selected}/presence`, { method: 'POST', body: { state } }).catch(() => undefined);
+    void say(composing ? 'composing' : 'viewing');
+    const t = setInterval(() => void say(composing ? 'composing' : 'viewing'), 30_000);
+    return () => {
+      clearInterval(t);
+      void say('left');
+    };
+  }, [selected, composing]);
+  useEffect(() => setPresence(detail?.presence ?? []), [detail]);
+
+  const toggle = (id: string) =>
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  useEffect(() => {
+    setChecked(new Set());
+    setBulkNote(null);
+  }, [view, accountId, q]);
+  useEffect(() => {
+    const first = [...checked][0];
+    if (!first || !can('conversation.assign')) return setBulkOptions(null);
+    api<AssigneeOptions>(`/threads/${first}/assignees`).then(setBulkOptions, () => setBulkOptions(null));
+  }, [checked, can]);
+
+  const bulk = async (action: string, extra: Record<string, string> = {}) => {
+    try {
+      const r = await api<BulkResult>('/threads/bulk', { method: 'POST', body: { threadIds: [...checked], action, ...extra } });
+      setBulkNote(r.failed.length ? `${r.done} updated, ${r.failed.length} not allowed or not found` : `${r.done} updated`);
+      setChecked(new Set());
+      await loadList();
+      void counts.reload();
+    } catch (e) {
+      setBulkNote((e as ApiError).message);
+    }
+  };
 
   const open = async (id: string) => {
     setSelected(id);
@@ -243,11 +295,61 @@ export default function InboxPage() {
           </select>
         </form>
         <ErrorBanner error={listError} />
+        {checked.size > 0 && (
+          <div className="flex flex-wrap items-center gap-1 border-b border-border bg-surface-2 px-2 py-1.5 text-[13px]" role="toolbar" aria-label="Bulk actions">
+            <span className="mr-1 font-medium">{checked.size} selected</span>
+            {bulkOptions && (
+              <Select
+                aria-label="Assign selected"
+                value=""
+                className="h-7 w-36 text-[12.5px]"
+                onChange={(e) => {
+                  const [k, id] = e.target.value.split(':');
+                  if (id) void bulk('assign', k === 'u' ? { assigneeId: id } : k === 't' ? { teamId: id } : { departmentId: id });
+                }}
+              >
+                <option value="">Assign to…</option>
+                {bulkOptions.users.map((u) => (
+                  <option key={u.id} value={`u:${u.id}`}>
+                    {u.name}
+                  </option>
+                ))}
+                {bulkOptions.teams.map((t) => (
+                  <option key={t.id} value={`t:${t.id}`}>
+                    Team: {t.name}
+                  </option>
+                ))}
+                {bulkOptions.departments.map((d) => (
+                  <option key={d.id} value={`d:${d.id}`}>
+                    Dept: {d.name}
+                  </option>
+                ))}
+              </Select>
+            )}
+            <Button size="sm" variant="ghost" onClick={() => void bulk('read')}>
+              Mark read
+            </Button>
+            {can('conversation.status') && (
+              <Button size="sm" variant="ghost" onClick={() => void bulk('archive')}>
+                Archive
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" onClick={() => setChecked(new Set())}>
+              Clear
+            </Button>
+          </div>
+        )}
+        {bulkNote && (
+          <p className="border-b border-border px-3 py-1 text-[12.5px] text-text-2" role="status">
+            {bulkNote}
+          </p>
+        )}
         <ul className="flex-1 overflow-y-auto">
           {!loading && !items.length && <li className="p-6 text-center text-[14px] text-text-3">{q ? 'No conversations match your search.' : 'Nothing here.'}</li>}
           {items.map((t) => (
-            <li key={t.id}>
-              <button onClick={() => void open(t.id)} className={`block w-full border-b border-border px-3 py-2.5 text-left ${selected === t.id ? 'bg-accent-soft' : 'hover:bg-surface-2'}`}>
+            <li key={t.id} className={`flex border-b border-border ${selected === t.id ? 'bg-accent-soft' : 'hover:bg-surface-2'}`}>
+              <input type="checkbox" aria-label={`Select ${t.subject}`} checked={checked.has(t.id)} onChange={() => toggle(t.id)} className="mt-3 ml-2.5 shrink-0" />
+              <button onClick={() => void open(t.id)} className="block min-w-0 flex-1 px-3 py-2.5 text-left">
                 <div className="flex items-baseline justify-between gap-2">
                   <span className={`truncate text-[14px] ${t.unreadCount ? 'font-semibold' : ''}`}>{who(t.from)}</span>
                   <span className="shrink-0 text-[12px] text-text-3">{shortDate(t.lastMessageAt)}</span>
@@ -263,7 +365,12 @@ export default function InboxPage() {
                 </p>
                 <div className="mt-1 flex flex-wrap gap-1">
                   {(mailboxes.data?.length ?? 0) > 1 && <Badge>{t.account.displayName ?? t.account.emailAddress}</Badge>}
-                  {t.assignee && <Badge tone="accent">{t.assignee.name}</Badge>}
+                  {t.assignee ? <Badge tone="accent">{t.assignee.name}</Badge> : t.team ? <Badge>{t.team.name}</Badge> : null}
+                  {t.tags.map((tag) => (
+                    <span key={tag.id} className="rounded px-1.5 py-0.5 text-[11.5px] font-medium text-white" style={{ background: tag.color }}>
+                      {tag.name}
+                    </span>
+                  ))}
                   {t.awaitingReplySince && !t.isArchived && <Badge tone="warning">Awaiting reply</Badge>}
                 </div>
               </button>
@@ -300,8 +407,13 @@ export default function InboxPage() {
                 </button>
                 <h1 className="text-[18px] font-semibold break-words">{detail.subject}</h1>
                 <p className="text-[13px] text-text-3">
-                  {detail.account.emailAddress} · {detail.status.replace(/_/g, ' ').toLowerCase()}
+                  {detail.account.emailAddress} · {detail.status.replace(/_/g, ' ').toLowerCase()} · {detail.priority.toLowerCase()} priority
                 </p>
+                {presence.length > 0 && (
+                  <p className="mt-1 text-[12.5px] font-medium text-warning" role="status">
+                    {presence.map((p) => `${p.name} is ${p.state === 'composing' ? 'replying' : 'viewing'}`).join(' · ')}
+                  </p>
+                )}
               </div>
               <div className="flex flex-wrap gap-1">
                 <Button size="sm" variant="ghost" onClick={() => void act('unread')}>
@@ -331,6 +443,8 @@ export default function InboxPage() {
               </div>
             </div>
 
+            <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
+            <div className="flex min-w-0 flex-col gap-3">
             {detail.messages.map((m) => (
               <article key={m.id} className="rounded-lg border border-border bg-surface">
                 <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border px-4 py-2.5">
@@ -395,6 +509,11 @@ export default function InboxPage() {
             ) : (
               <p className="text-[13px] text-text-3">You can read this conversation but not reply from {detail.account.emailAddress}.</p>
             )}
+            </div>
+            <div className="xl:order-last">
+              <CollabPanel thread={detail} onChanged={() => (void loadDetail(detail.id, images), void loadList())} />
+            </div>
+            </div>
           </div>
         )}
       </section>

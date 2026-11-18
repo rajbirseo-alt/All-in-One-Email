@@ -16,6 +16,7 @@ const MAIL_NAV: { href: string; label: string; anyOf: PermissionKey[] }[] = [
 ];
 const NAV: { href: string; label: string; anyOf: PermissionKey[] }[] = [
   { href: '/admin/mailboxes', label: 'Mailboxes', anyOf: ['account.connect', 'account.manage'] },
+  { href: '/admin/rules', label: 'Routing rules', anyOf: ['rules.manage'] },
   { href: '/admin/users', label: 'Employees', anyOf: ['user.read'] },
   { href: '/admin/org', label: 'Departments & teams', anyOf: ['user.read', 'org.manage'] },
   { href: '/admin/roles', label: 'Roles & permissions', anyOf: ['role.manage'] },

@@ -78,7 +78,7 @@ Webhook handlers only dedupe the event and enqueue a sync. They return 202 withi
 | POST | `/threads/:id/snooze` | `{until}` |
 | POST | `/threads/:id/status` | 🔒 `conversation.status` — `{status, reason?}` |
 | GET | `/events` | Server-Sent Events: `thread.updated {threadIds}` (filtered per user), `session.ended`. Replaces the WebSocket plan below for Phase 3 |
-| POST | `/threads/bulk` | *(Phase 5)* `{threadIds[], action, params}`, max 500 per call, async job with progress over WS |
+| POST | `/threads/bulk` | `{threadIds[], action, assigneeId?/teamId?/departmentId?, tagId?}`, max 500, synchronous; returns `{done, failed[]}` |
 | GET | `/search?q=` | Full-text over authorised threads (subject, participants, body) |
 | GET | `/messages/:id/raw` | *(later)* 🔒 `conversation.raw` — original headers for debugging |
 
@@ -100,6 +100,8 @@ Webhook handlers only dedupe the event and enqueue a sync. They return 202 withi
 | POST | `/threads/:id/assign` | 🔒 `conversation.assign` — `{assigneeId? teamId? departmentId? reason?}` |
 | POST | `/threads/:id/unassign` | |
 | GET | `/threads/:id/assignments` | History |
+| GET | `/threads/:id/assignees` | 🔒 `conversation.assign` — people, teams and departments the caller may assign to |
+| POST | `/threads/:id/presence` | `{state: viewing|composing|left}`; delivered as `presence` events on `/events` |
 | CRUD | `/assignment-rules` · PUT `/assignment-rules/order` | 🔒 `rules.manage` |
 | POST | `/assignment-rules/test` | Dry-runs a sample message or an existing thread against the rules |
 | CRUD | `/threads/:id/notes` | Body supports `@[userId]` mentions. Edit and delete only by the author |
