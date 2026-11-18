@@ -34,6 +34,10 @@ import { MailboxConnectService } from './mail/mailbox-connect.service';
 import { MailboxService } from './mail/mailbox.service';
 import { MailboxController } from './mail/mailbox.controller';
 import { WebhooksController } from './mail/webhooks.controller';
+import { ThreadsController } from './threads/threads.controller';
+import { ThreadsService } from './threads/threads.service';
+import { AttachmentsService } from './threads/attachments.service';
+import { ThreadActionsService } from './threads/thread-actions.service';
 
 /** Providers shared by the HTTP API and the worker process. */
 export function mailProviders(cfg: AppConfig, mailEndpoints?: MailEndpoints) {
@@ -61,7 +65,7 @@ export class AppModule {
     return {
       module: AppModule,
       imports: [ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 300 }])],
-      controllers: [AuthController, UsersController, RolesController, OrgController, AuditController, HealthController, MailboxController, WebhooksController],
+      controllers: [AuthController, UsersController, RolesController, OrgController, AuditController, HealthController, MailboxController, WebhooksController, ThreadsController],
       providers: [
         { provide: APP_CONFIG, useValue: cfg },
         { provide: SSO_PROVIDERS, useFactory: () => opts.ssoProviders ?? buildSsoProviders(cfg) },
@@ -81,6 +85,9 @@ export class AppModule {
         ...mailProviders(cfg, opts.mailEndpoints),
         MailboxConnectService,
         MailboxService,
+        ThreadsService,
+        AttachmentsService,
+        ThreadActionsService,
         // Order matters: rate-limit first, then authentication/authorisation.
         { provide: APP_GUARD, useClass: ThrottlerGuard },
         { provide: APP_GUARD, useClass: AuthGuard },

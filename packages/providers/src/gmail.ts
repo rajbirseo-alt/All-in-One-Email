@@ -91,6 +91,25 @@ export class GmailClient {
     return normalizeGmailMessage(body, acc);
   }
 
+  /** Adds/removes labels on up to 1000 messages (read = remove UNREAD, archive = remove INBOX, …). */
+  async modifyLabels(ids: string[], add: string[], remove: string[]): Promise<void> {
+    for (let i = 0; i < ids.length; i += 1000) {
+      await this.http.json(`${this.base}/messages/batchModify`, {
+        method: 'POST',
+        body: { ids: ids.slice(i, i + 1000), addLabelIds: add, removeLabelIds: remove },
+      });
+    }
+  }
+
+  /** Attachment bytes, or null when Gmail no longer accepts this attachment id. */
+  async attachment(messageId: string, attachmentId: string): Promise<Buffer | null> {
+    const { status, body } = await this.http.json<{ data?: string }>(
+      `${this.base}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+      { allow: [400, 404] },
+    );
+    return status === 200 && body.data ? Buffer.from(body.data, 'base64url') : null;
+  }
+
   /** Current label ids of a message (cheap), or null when it no longer exists. */
   async getLabelIds(id: string): Promise<string[] | null> {
     const { status, body } = await this.http.json<GmailRawMessage>(`${this.base}/messages/${encodeURIComponent(id)}?format=minimal`, { allow: [404] });

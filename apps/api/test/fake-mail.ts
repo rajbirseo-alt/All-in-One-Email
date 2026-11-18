@@ -11,6 +11,8 @@ import type { MailEndpoints } from '../src/mail/mail-endpoints';
  */
 
 const b64url = (s: string) => Buffer.from(s, 'utf8').toString('base64url');
+/** Deterministic attachment content so downloads can be checksummed. */
+export const attachmentBytes = (id: string) => `%PDF-1.4 fake attachment ${id}`;
 
 export interface GmailFakeMessage {
   id: string;
@@ -20,6 +22,7 @@ export interface GmailFakeMessage {
   to: string;
   subject: string;
   text: string;
+  html?: string;
   date: Date;
   messageId: string;
   inReplyTo?: string;
@@ -46,6 +49,9 @@ export class FakeMail {
   server!: Server;
   base = '';
   readonly calls: { method: string; path: string }[] = [];
+  readonly modifications: { mailbox: string; ids: string[]; addLabelIds: string[]; removeLabelIds: string[] }[] = [];
+  readonly graphPatches: { mailbox: string; id: string; patch: unknown }[] = [];
+  readonly graphMoves: { mailbox: string; id: string; destinationId: string }[] = [];
 
   // OAuth
   /** code → identity the code was issued for. */
@@ -271,7 +277,14 @@ export class FakeMail {
       { name: 'Date', value: m.date.toUTCString() },
       ...(m.inReplyTo ? [{ name: 'In-Reply-To', value: m.inReplyTo }] : []),
     ];
-    const textPart = { mimeType: 'text/plain', headers: [{ name: 'Content-Type', value: 'text/plain; charset=UTF-8' }], body: { size: m.text.length, data: b64url(m.text) } };
+    const plain = { mimeType: 'text/plain', headers: [{ name: 'Content-Type', value: 'text/plain; charset=UTF-8' }], body: { size: m.text.length, data: b64url(m.text) } };
+    const textPart = m.html
+      ? {
+          mimeType: 'multipart/alternative',
+          headers: [] as { name: string; value: string }[],
+          parts: [plain, { mimeType: 'text/html', headers: [{ name: 'Content-Type', value: 'text/html; charset=UTF-8' }], body: { size: m.html.length, data: b64url(m.html) } }],
+        }
+      : plain;
     const payload = m.attachment
       ? {
           mimeType: 'multipart/mixed',
@@ -295,6 +308,7 @@ export class FakeMail {
           { id: 'UNREAD', name: 'UNREAD', type: 'system' },
           { id: 'STARRED', name: 'STARRED', type: 'system' },
           { id: 'TRASH', name: 'TRASH', type: 'system' },
+          { id: 'SPAM', name: 'SPAM', type: 'system' },
           { id: 'CATEGORY_PROMOTIONS', name: 'CATEGORY_PROMOTIONS', type: 'system' },
           { id: 'Label_1', name: 'Clients', type: 'user' },
         ],
@@ -302,7 +316,7 @@ export class FakeMail {
     }
     if (path === '/messages') {
       const after = Number(/after:(\d+)/.exec(url.searchParams.get('q') ?? '')?.[1] ?? 0) * 1000;
-      const all = [...b.messages.values()].filter((m) => m.date.getTime() > after && !m.labelIds.includes('DRAFT')).sort((x, y) => y.date.getTime() - x.date.getTime());
+      const all = [...b.messages.values()].filter((m) => m.date.getTime() > after && !m.labelIds.includes('DRAFT') && !m.labelIds.includes('SPAM') && !m.labelIds.includes('TRASH')).sort((x, y) => y.date.getTime() - x.date.getTime());
       const start = Number(url.searchParams.get('pageToken') ?? 0);
       const page = all.slice(start, start + 2); // tiny pages exercise pagination
       return this.send(res, 200, {
@@ -311,9 +325,26 @@ export class FakeMail {
       });
     }
     const msg = /^\/messages\/([^/]+)$/.exec(path);
-    if (msg) {
+    if (msg && req.method === 'GET') {
       const m = b.messages.get(decodeURIComponent(msg[1]!));
       return m ? this.send(res, 200, this.gmailRaw(m, url.searchParams.get('format') ?? 'full')) : this.send(res, 404, { error: { code: 404, message: 'Not Found' } });
+    }
+    if (path === '/messages/batchModify' && req.method === 'POST') {
+      const body = JSON.parse(await this.body(req)) as { ids: string[]; addLabelIds: string[]; removeLabelIds: string[] };
+      for (const id of body.ids) {
+        const m = b.messages.get(id);
+        if (!m) continue;
+        m.labelIds = [...new Set([...m.labelIds.filter((l) => !body.removeLabelIds.includes(l)), ...body.addLabelIds])];
+        b.history.push({ id: ++b.historyId, labels: [id] });
+      }
+      this.modifications.push({ mailbox, ...body });
+      return this.send(res, 204);
+    }
+    const gatt = /^\/messages\/([^/]+)\/attachments\/([^/]+)$/.exec(path);
+    if (gatt) {
+      const m = b.messages.get(decodeURIComponent(gatt[1]!));
+      if (!m?.attachment || decodeURIComponent(gatt[2]!) !== `a-${m.id}`) return this.send(res, 400, { error: { code: 400, message: 'Invalid attachment token' } });
+      return this.send(res, 200, { size: m.attachment.size, data: Buffer.from(attachmentBytes(m.id)).toString('base64url') });
     }
     if (path === '/history') {
       const start = Number(url.searchParams.get('startHistoryId'));
@@ -394,6 +425,32 @@ export class FakeMail {
       }
       const next = `${this.base}/graph/v1.0/me/mailFolders/${encodeURIComponent(folderId)}/messages/delta?$deltatoken=${b.changes.length}`;
       return this.send(res, 200, { value, '@odata.deltaLink': next });
+    }
+    const one2 = /^\/me\/messages\/([^/]+)$/.exec(path);
+    if (one2 && req.method === 'PATCH') {
+      const m = b.messages.get(decodeURIComponent(one2[1]!));
+      if (!m) return this.send(res, 404, { error: { code: 'ErrorItemNotFound', message: 'x' } });
+      const patch = JSON.parse(await this.body(req)) as { isRead?: boolean; flag?: { flagStatus: string } };
+      if (patch.isRead !== undefined) m.isRead = patch.isRead;
+      this.graphPatches.push({ mailbox, id: m.id, patch });
+      return this.send(res, 200, this.graphRaw(m));
+    }
+    const mv = /^\/me\/messages\/([^/]+)\/move$/.exec(path);
+    if (mv && req.method === 'POST') {
+      const id = decodeURIComponent(mv[1]!);
+      if (!b.messages.has(id)) return this.send(res, 404, { error: { code: 'ErrorItemNotFound', message: 'x' } });
+      const { destinationId } = JSON.parse(await this.body(req)) as { destinationId: string };
+      const target = ({ inbox: 'F-INBOX', archive: 'F-ARCHIVE', junkemail: 'F-JUNK', deleteditems: 'F-DELETED' } as Record<string, string>)[destinationId] ?? destinationId;
+      this.graphMove(mailbox, id, target);
+      this.graphMoves.push({ mailbox, id, destinationId });
+      return this.send(res, 201, this.graphRaw(b.messages.get(id)!));
+    }
+    const attOne = /^\/me\/messages\/([^/]+)\/attachments\/([^/]+)$/.exec(path);
+    if (attOne) {
+      const m = b.messages.get(decodeURIComponent(attOne[1]!));
+      const a = m?.attachments?.find((x) => x.id === decodeURIComponent(attOne[2]!));
+      if (!a) return this.send(res, 404, { error: { code: 'ErrorItemNotFound', message: 'x' } });
+      return this.send(res, 200, { '@odata.type': '#microsoft.graph.fileAttachment', id: a.id, name: a.name, contentBytes: Buffer.from(attachmentBytes(a.id)).toString('base64') });
     }
     const att = /^\/me\/messages\/([^/]+)\/attachments$/.exec(path);
     if (att) {

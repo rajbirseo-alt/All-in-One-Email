@@ -5,6 +5,7 @@ import { APP_CONFIG, type AppConfig } from './config/config';
 import { envelopeProvider } from './crypto.provider';
 import type { MailEndpoints } from './mail/mail-endpoints';
 import { MailWorkerService } from './mail/mail-worker.service';
+import { FlagPushService } from './mail/flag-push.service';
 import { RetentionService } from './mail/retention.service';
 import { PrismaService } from './prisma/prisma.service';
 
@@ -21,6 +22,7 @@ export class WorkerModule {
         AuditService,
         ...mailProviders(cfg, opts.mailEndpoints),
         RetentionService,
+        FlagPushService,
         MailWorkerService,
       ],
     };

@@ -165,3 +165,27 @@ export type CreateUserInput = z.infer<typeof createUserSchema>;
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 export type PermissionOverridesInput = z.infer<typeof permissionOverridesSchema>;
 export type RolePermissionsInput = z.infer<typeof rolePermissionsSchema>;
+
+// ── Conversations (Phase 3) ──
+export const THREAD_VIEWS = ['inbox', 'mine', 'unassigned', 'unread', 'pending', 'waiting', 'followup', 'starred', 'snoozed', 'sent', 'archive', 'spam', 'trash', 'closed', 'all'] as const;
+export type ThreadView = (typeof THREAD_VIEWS)[number];
+export const CONVERSATION_STATUSES = ['NEW', 'ASSIGNED', 'IN_PROGRESS', 'WAITING_FOR_CLIENT', 'PENDING_REPLY', 'FOLLOW_UP_REQUIRED', 'REPLY_NOT_NEEDED', 'CLOSED'] as const;
+export const PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const;
+
+const many = <T extends z.ZodTypeAny>(t: T) => z.preprocess((v) => (v === undefined || Array.isArray(v) ? v : [v]), z.array(t).max(50)).optional();
+
+export const threadListQuery = z.object({
+  view: z.enum(THREAD_VIEWS).default('inbox'),
+  accountId: many(id),
+  status: many(z.enum(CONVERSATION_STATUSES)),
+  assigneeId: id.optional(),
+  q: z.string().trim().max(200).optional(),
+  dateFrom: z.coerce.date().optional(),
+  dateTo: z.coerce.date().optional(),
+  hasAttachments: z.enum(['true', 'false']).optional(),
+  cursor: z.string().max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+export const threadDetailQuery = z.object({ images: z.enum(['true', 'false']).optional() });
+export const THREAD_ACTIONS = ['read', 'unread', 'star', 'unstar', 'archive', 'unarchive', 'spam', 'not-spam'] as const;
+export const snoozeSchema = z.object({ until: z.coerce.date().nullable() });

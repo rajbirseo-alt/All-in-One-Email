@@ -8,7 +8,24 @@ export const QUEUES = {
   poll: 'mail-poll',
   subscriptions: 'mail-subscriptions',
   purge: 'mail-purge',
+  /** Read/star/archive/spam changes pushed back to the provider, in order per conversation. */
+  flags: 'mail-flags',
+  /** Outgoing mail (drafts approved by a human). */
+  send: 'mail-send',
 } as const;
+
+export type FlagAction = 'read' | 'unread' | 'star' | 'unstar' | 'archive' | 'unarchive' | 'spam' | 'not-spam';
+
+export interface FlagJob {
+  threadId: string;
+  action: FlagAction;
+  /** Stored message ids the action applies to. */
+  messageIds: string[];
+}
+
+export interface SendJob {
+  draftId: string;
+}
 
 export interface SyncJob {
   accountId: string;
@@ -49,6 +66,13 @@ export class QueueService implements OnModuleDestroy {
     if (!existing.has(QUEUES.sync)) {
       await boss.createQueue(QUEUES.sync, { policy: 'stately', retryLimit: 5, retryDelay: 30, retryBackoff: true, retryDelayMax: 1800, expireInSeconds: 3600 });
     }
+    if (!existing.has(QUEUES.flags)) {
+      await boss.createQueue(QUEUES.flags, { policy: 'key_strict_fifo', retryLimit: 5, retryDelay: 15, retryBackoff: true, retryDelayMax: 900 });
+    }
+    // Sending is retried only for errors where the provider did not accept the message (see SendService).
+    if (!existing.has(QUEUES.send)) {
+      await boss.createQueue(QUEUES.send, { policy: 'standard', retryLimit: 3, retryDelay: 20, retryBackoff: true, expireInSeconds: 600 });
+    }
     for (const name of [QUEUES.poll, QUEUES.subscriptions, QUEUES.purge]) {
       if (!existing.has(name)) await boss.createQueue(name, { policy: 'singleton', retryLimit: 2 });
     }
@@ -57,6 +81,16 @@ export class QueueService implements OnModuleDestroy {
   async enqueueSync(accountId: string, kind: SyncKind): Promise<void> {
     const boss = await this.get();
     await boss.send(QUEUES.sync, { accountId, kind } satisfies SyncJob, { singletonKey: accountId });
+  }
+
+  async enqueueFlags(job: FlagJob): Promise<void> {
+    const boss = await this.get();
+    await boss.send(QUEUES.flags, job, { singletonKey: job.threadId });
+  }
+
+  async enqueueSend(job: SendJob, startAfter?: Date): Promise<void> {
+    const boss = await this.get();
+    await boss.send(QUEUES.send, job, startAfter ? { startAfter } : {});
   }
 
   async onModuleDestroy() {

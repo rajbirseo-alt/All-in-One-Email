@@ -158,7 +158,7 @@ describe('Gmail sync', () => {
     expect(thread.firstResponseAt).toEqual(m2!.receivedAt);
     expect((await prisma.emailThread.findFirstOrThrow({ where: { emailAccountId: id, providerThreadId: 't-m3' } })).awaitingReplySince).toEqual(m3!.receivedAt);
     // CATEGORY_* and UNREAD are flags, not folders.
-    expect((await prisma.emailFolder.findMany({ where: { emailAccountId: id } })).map((f) => f.type).sort()).toEqual(['CUSTOM', 'INBOX', 'SENT', 'STARRED', 'TRASH']);
+    expect((await prisma.emailFolder.findMany({ where: { emailAccountId: id } })).map((f) => f.type).sort()).toEqual(['CUSTOM', 'INBOX', 'SENT', 'SPAM', 'STARRED', 'TRASH']);
   });
 
   it('is idempotent: running again stores nothing twice', async () => {

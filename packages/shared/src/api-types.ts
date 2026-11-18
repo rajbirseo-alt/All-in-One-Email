@@ -178,3 +178,69 @@ export interface MailboxProvidersResponse {
   initialSyncDays: number;
   retentionDays: number;
 }
+
+// ── Conversations (Phase 3) ──
+export interface Participant {
+  address: string;
+  name: string | null;
+}
+
+export interface ThreadListItem {
+  id: string;
+  subject: string;
+  snippet: string | null;
+  status: string;
+  priority: string;
+  account: { id: string; emailAddress: string; displayName: string | null; provider: MailProviderKey };
+  assignee: { id: string; name: string } | null;
+  /** Sender of the latest inbound message (or of the latest message). */
+  from: Participant | null;
+  messageCount: number;
+  unreadCount: number;
+  hasAttachments: boolean;
+  isStarred: boolean;
+  isArchived: boolean;
+  isSpam: boolean;
+  isTrashed: boolean;
+  lastMessageAt: string;
+  awaitingReplySince: string | null;
+  snoozedUntil: string | null;
+  followUpAt: string | null;
+}
+
+export interface AttachmentInfo {
+  id: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  isInline: boolean;
+}
+
+export interface MessageView {
+  id: string;
+  direction: 'INBOUND' | 'OUTBOUND';
+  from: Participant;
+  to: Participant[];
+  cc: Participant[];
+  /** Only shown on outbound messages. */
+  bcc: Participant[];
+  replyTo: Participant[];
+  subject: string;
+  sentAt: string | null;
+  receivedAt: string;
+  isRead: boolean;
+  isStarred: boolean;
+  /** Sanitised HTML (render in a sandboxed iframe). */
+  html: string;
+  blockedImages: number;
+  attachments: AttachmentInfo[];
+  sentBy: { id: string; name: string } | null;
+}
+
+export interface ThreadDetail extends ThreadListItem {
+  version: number;
+  messages: MessageView[];
+  canReply: boolean;
+}
+
+export type ThreadCounts = Record<string, number>;

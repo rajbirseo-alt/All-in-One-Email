@@ -158,6 +158,28 @@ export class GraphClient {
     }));
   }
 
+  /** Updates read state or flag. Returns false when the message no longer exists. */
+  async updateMessage(id: string, patch: { isRead?: boolean; flag?: { flagStatus: 'flagged' | 'notFlagged' } }): Promise<boolean> {
+    const { status } = await this.http.json(`${this.base}/me/messages/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch, allow: [404] });
+    return status !== 404;
+  }
+
+  /** Moves a message to a folder id or well-known name (inbox, archive, junkemail, deleteditems). */
+  async moveMessage(id: string, destinationId: string): Promise<boolean> {
+    const { status } = await this.http.json(`${this.base}/me/messages/${encodeURIComponent(id)}/move`, { method: 'POST', body: { destinationId }, allow: [404] });
+    return status !== 404;
+  }
+
+  /** File attachment bytes; null for missing or non-file (item/reference) attachments. */
+  async attachmentContent(messageId: string, attachmentId: string): Promise<Buffer | null> {
+    const { status, body } = await this.http.json<{ '@odata.type'?: string; contentBytes?: string }>(
+      `${this.base}/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+      { allow: [404] },
+    );
+    if (status === 404 || body['@odata.type'] !== '#microsoft.graph.fileAttachment' || !body.contentBytes) return null;
+    return Buffer.from(body.contentBytes, 'base64');
+  }
+
   async createSubscription(p: { resource: string; notificationUrl: string; lifecycleNotificationUrl: string; clientState: string; expiresAt: Date }) {
     const { body } = await this.http.json<{ id: string; expirationDateTime: string }>(`${this.base}/subscriptions`, {
       method: 'POST',
