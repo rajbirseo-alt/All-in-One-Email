@@ -34,6 +34,8 @@ import { MailboxConnectService } from './mail/mailbox-connect.service';
 import { MailboxService } from './mail/mailbox.service';
 import { MailboxController } from './mail/mailbox.controller';
 import { WebhooksController } from './mail/webhooks.controller';
+import { EventsHub, EventsPublisher } from './events/events.service';
+import { EventsController } from './events/events.controller';
 import { ThreadsController } from './threads/threads.controller';
 import { ThreadsService } from './threads/threads.service';
 import { AttachmentsService } from './threads/attachments.service';
@@ -46,6 +48,7 @@ import { SignaturesService, TemplatesService } from './compose/library.service';
 export function mailProviders(cfg: AppConfig, mailEndpoints?: MailEndpoints) {
   return [
     { provide: MAIL_ENDPOINTS, useFactory: () => mailEndpoints ?? buildMailEndpoints(cfg) },
+    EventsPublisher,
     CredentialService,
     IngestService,
     SyncService,
@@ -68,7 +71,7 @@ export class AppModule {
     return {
       module: AppModule,
       imports: [ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 300 }])],
-      controllers: [AuthController, UsersController, RolesController, OrgController, AuditController, HealthController, MailboxController, WebhooksController, ThreadsController, ComposeController],
+      controllers: [AuthController, UsersController, RolesController, OrgController, AuditController, HealthController, MailboxController, WebhooksController, ThreadsController, ComposeController, EventsController],
       providers: [
         { provide: APP_CONFIG, useValue: cfg },
         { provide: SSO_PROVIDERS, useFactory: () => opts.ssoProviders ?? buildSsoProviders(cfg) },
@@ -92,6 +95,7 @@ export class AppModule {
         AttachmentsService,
         ThreadActionsService,
         DraftsService,
+        EventsHub,
         SignaturesService,
         TemplatesService,
         // Order matters: rate-limit first, then authentication/authorisation.

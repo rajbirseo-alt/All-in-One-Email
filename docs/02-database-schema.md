@@ -54,7 +54,7 @@ AutomationRule ─< AutomationRun, WebhookEvent, AuditLog
 
 ## Things Prisma cannot express (raw SQL migration `20261116110000_security_search`)
 
-Columns use Prisma's camelCase names (quoted in SQL). The sketch below shows the intent; the migration file is authoritative. Audit immutability is implemented as a trigger rather than REVOKE, because on Render the application connects as the table owner. RLS lands with the conversation module in Phase 3.
+Columns use Prisma's camelCase names (quoted in SQL). The sketch below shows the intent; the migration file is authoritative. Audit immutability is implemented as a trigger rather than REVOKE, because on Render the application connects as the table owner. RLS was planned with the conversation module in Phase 3 and has moved to Phase 10 (hardening); see phases/phase-3.md.
 
 ```sql
 -- Full-text search

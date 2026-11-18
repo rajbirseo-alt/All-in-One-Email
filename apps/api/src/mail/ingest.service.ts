@@ -3,6 +3,7 @@ import { Prisma, type FolderType } from '@crm/db';
 import { newId } from '@crm/crypto';
 import { normalizeSubject, type NormalizedMessage } from '@crm/providers';
 import { PrismaService } from '../prisma/prisma.service';
+import { EventsPublisher } from '../events/events.service';
 
 export interface FolderRef {
   id: string;
@@ -32,7 +33,10 @@ const json = (v: unknown) => v as Prisma.InputJsonValue;
  */
 @Injectable()
 export class IngestService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly events: EventsPublisher,
+  ) {}
 
   emptyResult(): IngestResult {
     return { added: 0, updated: 0, removed: 0, threadIds: new Set() };
@@ -190,7 +194,8 @@ export class IngestService {
    * without messages are deleted.
    */
   async refreshThreads(threadIds: Iterable<string>) {
-    for (const threadId of threadIds) {
+    const ids = [...threadIds];
+    for (const threadId of ids) {
       const msgs = await this.prisma.emailMessage.findMany({
         where: { threadId },
         orderBy: { receivedAt: 'asc' },
@@ -247,5 +252,7 @@ export class IngestService {
       const messagesChanged = before.messageCount !== data.messageCount || before.lastMessageAt.getTime() !== data.lastMessageAt.getTime();
       if (changed) await this.prisma.emailThread.update({ where: { id: threadId }, data: { ...data, ...(messagesChanged ? { version: { increment: 1 } } : {}) } });
     }
+    // Live updates: open inboxes refetch these threads (ids only; recipients are filtered per user).
+    if (ids.length) await this.events.threadsChanged(ids).catch(() => undefined);
   }
 }

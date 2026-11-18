@@ -73,7 +73,8 @@ export class SessionService {
     clearCookie(res, this.cfg, names.csrf, false);
   }
 
-  async validate(token: string | undefined): Promise<ValidSession | null> {
+  /** `touch: false` checks without counting as activity (used by the live-update stream, so an idle open tab still times out). */
+  async validate(token: string | undefined, opts: { touch?: boolean } = {}): Promise<ValidSession | null> {
     if (!token || token.length > 200) return null;
     const s = await this.prisma.session.findUnique({
       where: { tokenHash: sha256Hex(token) },
@@ -83,7 +84,7 @@ export class SessionService {
     if (!s || s.revokedAt || s.expiresAt.getTime() <= now) return null;
     if (now - s.lastSeenAt.getTime() > this.idleMs) return null;
     if (s.user.status !== 'ACTIVE') return null;
-    if (now - s.lastSeenAt.getTime() > TOUCH_INTERVAL_MS) {
+    if (opts.touch !== false && now - s.lastSeenAt.getTime() > TOUCH_INTERVAL_MS) {
       await this.prisma.session.update({ where: { id: s.id }, data: { lastSeenAt: new Date(now) } });
     }
     return {

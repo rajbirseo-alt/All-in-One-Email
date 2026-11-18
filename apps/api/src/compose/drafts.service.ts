@@ -187,7 +187,8 @@ export class DraftsService {
         ...(patch.cc ? { ccRecipients: json(patch.cc) } : {}),
         ...(patch.bcc ? { bccRecipients: json(patch.bcc) } : {}),
         ...(patch.subject !== undefined ? { subject: patch.subject } : {}),
-        ...(patch.bodyHtml !== undefined ? { bodyHtml: patch.bodyHtml } : {}),
+        // Sanitised on save: the composer renders this HTML in the CRM page itself.
+        ...(patch.bodyHtml !== undefined ? { bodyHtml: sanitizeEmailHtml(patch.bodyHtml, { cidUrl: () => null, loadRemoteImages: true }).html } : {}),
         status: 'EDITING',
         sendError: null,
       },

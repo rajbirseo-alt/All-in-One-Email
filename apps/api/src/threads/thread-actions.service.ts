@@ -7,6 +7,7 @@ import type { RequestContext } from '../common/request-context';
 import { IngestService } from '../mail/ingest.service';
 import { QueueService, type FlagAction } from '../mail/queue.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { EventsPublisher } from '../events/events.service';
 
 /** Folder changes per action, applied locally so the next sync does not undo the action before the provider has it. */
 const FOLDER_CHANGE: Partial<Record<FlagAction, { remove: FolderType[]; add: FolderType | null }>> = {
@@ -26,6 +27,7 @@ export class ThreadActionsService {
     private readonly ingest: IngestService,
     private readonly queue: QueueService,
     private readonly audit: AuditService,
+    private readonly events: EventsPublisher,
   ) {}
 
   private async visible(ctx: RequestContext, id: string, permission: 'conversation.read' | 'conversation.status') {
@@ -97,5 +99,6 @@ export class ThreadActionsService {
     await this.visible(ctx, id, 'conversation.read');
     if (until && until.getTime() <= Date.now()) throw Errors.validation([{ path: 'until', message: 'Choose a time in the future' }]);
     await this.prisma.emailThread.update({ where: { id }, data: { snoozedUntil: until } });
+    await this.events.threadsChanged([id]);
   }
 }

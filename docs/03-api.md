@@ -71,15 +71,16 @@ Webhook handlers only dedupe the event and enqueue a sync. They return 202 withi
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/threads` | `view=all\|mine\|assigned\|unassigned\|unread\|pending\|waiting\|followup\|closed\|sent\|drafts\|archive\|spam\|overdue` plus filters `accountId[] departmentId[] assigneeId[] from to dateFrom dateTo subject status[] priority[] tagId[] q` |
-| GET | `/threads/counts` | Badge counts per view for the sidebar |
+| GET | `/threads/counts` | Badge counts: unread for inbox/mine/unassigned, totals for the other views |
 | GET | `/threads/:id` | Thread + messages + attachments metadata + notes + assignment and status history |
 | PATCH | `/threads/:id` | `{priority?, followUpAt?}` |
 | POST | `/threads/:id/read` · `/unread` · `/star` · `/unstar` · `/archive` · `/unarchive` · `/spam` · `/not-spam` | Pushed back to the provider by the `flag.push` job |
 | POST | `/threads/:id/snooze` | `{until}` |
 | POST | `/threads/:id/status` | 🔒 `conversation.status` — `{status, reason?}` |
-| POST | `/threads/bulk` | `{threadIds[], action, params}`, max 500 per call, async job with progress over WS |
+| GET | `/events` | Server-Sent Events: `thread.updated {threadIds}` (filtered per user), `session.ended`. Replaces the WebSocket plan below for Phase 3 |
+| POST | `/threads/bulk` | *(Phase 5)* `{threadIds[], action, params}`, max 500 per call, async job with progress over WS |
 | GET | `/search?q=` | Full-text over authorised threads (subject, participants, body) |
-| GET | `/messages/:id/raw` | 🔒 `conversation.raw` — original headers for debugging |
+| GET | `/messages/:id/raw` | *(later)* 🔒 `conversation.raw` — original headers for debugging |
 
 ## Compose & send — Phase 3
 | Method | Path | Notes |
@@ -88,6 +89,7 @@ Webhook handlers only dedupe the event and enqueue a sync. They return 202 withi
 | PATCH | `/drafts/:id` | Autosave (debounced client side) |
 | DELETE | `/drafts/:id` | |
 | POST | `/drafts/:id/attachments` | Multipart upload. Size and type limits, virus scan |
+| POST | `/drafts/:id/cancel-send` | Cancels a scheduled send that has not started |
 | POST | `/drafts/:id/send` | 🔒 `conversation.reply` + mailbox `REPLY`. Body `{baseThreadVersion, scheduledFor?}`. Returns 409 `THREAD_CHANGED` with `newMessages[]` on collision. Returns 202 `{status:"QUEUED"}`, and the result arrives over WS |
 | GET | `/attachments/:id/download` | Permission check → 302 to a 60-second presigned URL |
 | CRUD | `/signatures`, `/templates` | Templates support `{{contact.name}}`-style variables |

@@ -7,9 +7,13 @@ import type { PermissionKey } from '@crm/shared';
 import { useSession } from '@/lib/session';
 
 /**
- * Navigation lists only modules that are built (Phase 1) and that the user may use.
- * Inbox, CRM, reports etc. appear here in the phases that deliver their backends.
+ * Navigation lists only modules that are built and that the user may use.
+ * CRM, reports etc. appear here in the phases that deliver their backends.
  */
+const MAIL_NAV: { href: string; label: string; anyOf: PermissionKey[] }[] = [
+  { href: '/inbox', label: 'Inbox', anyOf: ['conversation.read'] },
+  { href: '/settings/compose', label: 'Signatures & templates', anyOf: ['conversation.reply'] },
+];
 const NAV: { href: string; label: string; anyOf: PermissionKey[] }[] = [
   { href: '/admin/mailboxes', label: 'Mailboxes', anyOf: ['account.connect', 'account.manage'] },
   { href: '/admin/users', label: 'Employees', anyOf: ['user.read'] },
@@ -23,6 +27,22 @@ export function AppShell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
   const items = NAV.filter((n) => n.anyOf.some(can));
+  const mailItems = MAIL_NAV.filter((n) => n.anyOf.some(can));
+  const fullHeight = path.startsWith('/inbox');
+  const link = (n: { href: string; label: string }) => {
+    const active = path.startsWith(n.href);
+    return (
+      <Link
+        key={n.href}
+        href={n.href}
+        onClick={() => setOpen(false)}
+        aria-current={active ? 'page' : undefined}
+        className={`rounded-md px-2.5 py-1.5 ${active ? 'bg-accent-soft font-medium text-accent' : 'text-text-2 hover:bg-surface-2 hover:text-text'}`}
+      >
+        {n.label}
+      </Link>
+    );
+  };
   const initials = me.user.name
     .split(/\s+/)
     .map((p) => p[0])
@@ -32,21 +52,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const nav = (
     <nav className="flex flex-col gap-0.5 p-3" aria-label="Main">
-      <p className="px-2 pt-1 pb-2 text-[11px] font-semibold tracking-wider text-text-3 uppercase">Administration</p>
-      {items.map((n) => {
-        const active = path.startsWith(n.href);
-        return (
-          <Link
-            key={n.href}
-            href={n.href}
-            onClick={() => setOpen(false)}
-            aria-current={active ? 'page' : undefined}
-            className={`rounded-md px-2.5 py-1.5 ${active ? 'bg-accent-soft font-medium text-accent' : 'text-text-2 hover:bg-surface-2 hover:text-text'}`}
-          >
-            {n.label}
-          </Link>
-        );
-      })}
+      {mailItems.length > 0 && (
+        <>
+          <p className="px-2 pt-1 pb-2 text-[11px] font-semibold tracking-wider text-text-3 uppercase">Mail</p>
+          {mailItems.map(link)}
+        </>
+      )}
+      {items.length > 0 && <p className="px-2 pt-4 pb-2 text-[11px] font-semibold tracking-wider text-text-3 uppercase">Administration</p>}
+      {items.map(link)}
       <p className="px-2 pt-4 pb-2 text-[11px] font-semibold tracking-wider text-text-3 uppercase">You</p>
       <Link
         href="/account"
@@ -91,7 +104,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </aside>
           </div>
         )}
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
+        <main className={fullHeight ? 'h-[calc(100vh-48px)] min-w-0 flex-1 overflow-hidden' : 'min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8'}>{children}</main>
       </div>
     </div>
   );
