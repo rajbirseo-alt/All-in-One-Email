@@ -42,7 +42,7 @@ AutomationRule ─< AutomationRun, WebhookEvent, AuditLog
 
 **Collision detection.** `EmailThread.version` goes up on every inbound or outbound message and on every status change. A draft stores `baseThreadVersion`, and the send endpoint compares the two (see 01 §6).
 
-**SLA clock.** `awaitingReplySince` is set when an inbound message arrives that has no later outbound message. It is cleared when someone replies or the status moves to `REPLY_NOT_NEEDED` or `CLOSED`. `SlaEvent` rows make each escalation step fire only once per waiting cycle.
+**SLA clock.** `awaitingReplySince` is set when an inbound message arrives that has no later outbound message. It is cleared when someone replies or the status moves to `REPLY_NOT_NEEDED` or `CLOSED`. `SlaEvent` rows make each escalation step fire only once per waiting cycle. *As built (Phase 6):* `awaitingReplySince` itself follows the messages; the clock is considered stopped while the status is `WAITING_FOR_CLIENT`, `REPLY_NOT_NEEDED` or `CLOSED`, for spam/trash, and for mail older than the mailbox connection. `slaDueAt` is the overdue step's time, `slaNextAt` (indexed) the next unfired step for the minute sweeper, `slaBreachedAt` set when the overdue or escalation step fires in the current cycle.
 
 **"Reply Not Needed" leaves pending reports.** Pending-response queries filter `awaitingReplySince IS NOT NULL AND status NOT IN ('REPLY_NOT_NEEDED','CLOSED')`. When a new inbound message arrives, the status is re-assessed back to `PENDING_REPLY` (see 05 and the status rules in 03).
 

@@ -9,6 +9,8 @@ import { PrismaService } from '../prisma/prisma.service';
 
 export const EVENTS_CHANNEL = 'crm_events';
 export const PRESENCE_CHANNEL = 'crm_presence';
+/** Payload: the user id whose notifications changed (the client refetches its own bell). */
+export const NOTIFY_CHANNEL = 'crm_notify';
 /** Presence older than this is dropped (clients refresh every ~30 s). */
 const PRESENCE_TTL_MS = 75_000;
 
@@ -39,6 +41,10 @@ export class EventsPublisher {
       const payload: ThreadEvent = { type: 'thread.updated', threadIds: ids.slice(i, i + IDS_PER_NOTIFY) };
       await this.prisma.$executeRaw(Prisma.sql`SELECT pg_notify(${EVENTS_CHANNEL}, ${JSON.stringify(payload)})`);
     }
+  }
+
+  async notificationsChanged(userId: string) {
+    await this.prisma.$executeRaw(Prisma.sql`SELECT pg_notify(${NOTIFY_CHANNEL}, ${userId})`);
   }
 }
 
@@ -76,6 +82,7 @@ export class EventsHub implements OnModuleDestroy {
         try {
           if (n.channel === EVENTS_CHANNEL) void this.dispatch(JSON.parse(n.payload) as ThreadEvent);
           else if (n.channel === PRESENCE_CHANNEL) void this.onPresence(JSON.parse(n.payload) as PresenceNotice);
+          else if (n.channel === NOTIFY_CHANNEL) this.onNotify(n.payload);
         } catch {
           /* ignore malformed */
         }
@@ -87,6 +94,7 @@ export class EventsHub implements OnModuleDestroy {
       await client.connect();
       await client.query(`LISTEN ${EVENTS_CHANNEL}`);
       await client.query(`LISTEN ${PRESENCE_CHANNEL}`);
+      await client.query(`LISTEN ${NOTIFY_CHANNEL}`);
       return client;
     })();
     return this.listener;
@@ -150,6 +158,11 @@ export class EventsHub implements OnModuleDestroy {
         s.res.write(': ping\n\n');
       }
     }
+  }
+
+  /** Only the owner's own streams hear about their notifications. */
+  private onNotify(userId: string) {
+    for (const s of this.subscribers) if (s.ctx.userId === userId) s.res.write('event: notification\ndata: {}\n\n');
   }
 
   private async dispatch(ev: ThreadEvent) {

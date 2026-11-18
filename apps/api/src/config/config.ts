@@ -51,6 +51,12 @@ const schema = z
     GMAIL_PUSH_SERVICE_ACCOUNT: z.string().email().optional(),
     /** Audience configured on the push subscription. Defaults to the webhook URL. */
     GMAIL_PUSH_AUDIENCE: z.string().optional(),
+
+    // ── Browser push notifications (Phase 6). Generate once with `npx web-push generate-vapid-keys`. ──
+    VAPID_PUBLIC_KEY: z.string().optional(),
+    VAPID_PRIVATE_KEY: z.string().optional(),
+    /** Contact the push services can reach, e.g. mailto:it@seodiscovery.com. Defaults to APP_URL. */
+    VAPID_SUBJECT: z.string().optional(),
   })
   .superRefine((c, ctx) => {
     if (c.NODE_ENV === 'production' && !c.APP_URL.startsWith('https://')) {
@@ -69,6 +75,9 @@ const schema = z
     if (!!c.GMAIL_PUBSUB_TOPIC !== !!c.GMAIL_PUSH_SERVICE_ACCOUNT) {
       ctx.addIssue({ code: 'custom', path: ['GMAIL_PUSH_SERVICE_ACCOUNT'], message: 'set GMAIL_PUBSUB_TOPIC and GMAIL_PUSH_SERVICE_ACCOUNT together' });
     }
+    if (!!c.VAPID_PUBLIC_KEY !== !!c.VAPID_PRIVATE_KEY) {
+      ctx.addIssue({ code: 'custom', path: ['VAPID_PRIVATE_KEY'], message: 'set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY together' });
+    }
   });
 
 export type AppConfig = z.infer<typeof schema> & {
@@ -81,6 +90,8 @@ export type AppConfig = z.infer<typeof schema> & {
   /** Graph only delivers notifications to https endpoints. */
   graphPushEnabled: boolean;
   gmailPushEnabled: boolean;
+  /** Browser push is on when VAPID keys are configured. */
+  webPushEnabled: boolean;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -100,6 +111,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     webhookBaseUrl: `${new URL(c.APP_URL).origin}/api/v1/webhooks`,
     graphPushEnabled: !!c.MICROSOFT_CLIENT_ID && c.APP_URL.startsWith('https://'),
     gmailPushEnabled: !!c.GOOGLE_CLIENT_ID && !!c.GMAIL_PUBSUB_TOPIC,
+    webPushEnabled: !!c.VAPID_PUBLIC_KEY && !!c.VAPID_PRIVATE_KEY,
   };
 }
 

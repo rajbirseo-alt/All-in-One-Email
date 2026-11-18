@@ -16,6 +16,7 @@ import { CredentialService } from './credential.service';
 import { IngestService, type FolderRef, type IngestResult, type IngestTarget } from './ingest.service';
 import { MAIL_ENDPOINTS, type MailEndpoints } from './mail-endpoints';
 import { RoutingService } from '../assignment/routing.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 /** Consecutive failed runs before the account is shown as ERROR. */
 export const ERROR_THRESHOLD = 5;
@@ -58,6 +59,7 @@ export class SyncService {
     private readonly audit: AuditService,
     @Inject(MAIL_ENDPOINTS) private readonly endpoints: MailEndpoints,
     private readonly routing: RoutingService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   gmail(accountId: string) {
@@ -130,6 +132,11 @@ export class SyncService {
           });
         }
       });
+      if (auth && account.status !== 'NEEDS_REAUTH') {
+        await this.notifications.notify([
+          { userId: account.connectedById, type: 'ACCOUNT_NEEDS_REAUTH', title: 'Mailbox ' + account.emailAddress + ' must be reconnected', body: 'Open Administration → Mailboxes and choose Reconnect.', data: { accountId } },
+        ]).catch(() => undefined);
+      }
       if (auth) {
         this.log.warn(`Mailbox ${accountId} needs to be reconnected: ${message}`);
         return 'needs_reauth';

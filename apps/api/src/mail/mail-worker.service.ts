@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { FlagPushService } from './flag-push.service';
-import { QUEUES, QueueService, type FlagJob, type SendJob, type SyncJob } from './queue.service';
+import { QUEUES, QueueService, type FlagJob, type PushJob, type SendJob, type SyncJob } from './queue.service';
+import { PushService } from '../notifications/push.service';
+import { SlaService } from '../sla/sla.service';
+import { StatusService } from '../status/status.service';
 import { SendService } from '../compose/send.service';
 import { RetentionService } from './retention.service';
 import { SubscriptionService } from './subscription.service';
@@ -14,6 +17,8 @@ export const SCHEDULES = {
   subscriptions: '7 * * * *',
   /** 21:30 UTC = 03:00 IST. */
   purge: '30 21 * * *',
+  /** SLA steps and follow-up dates. */
+  slaSweep: '* * * * *',
 } as const;
 
 /** Runs in the worker process only: job handlers and cron schedules. */
@@ -29,7 +34,17 @@ export class MailWorkerService {
     private readonly prisma: PrismaService,
     private readonly flags: FlagPushService,
     private readonly sender: SendService,
+    private readonly sla: SlaService,
+    private readonly status: StatusService,
+    private readonly push: PushService,
   ) {}
+
+  /** Due SLA steps and follow-up dates (also called directly by tests with a fixed clock). */
+  async sweep(now = new Date()) {
+    const sla = await this.sla.sweep(now);
+    const followUps = await this.status.followUpSweep(now);
+    return { sla, followUps };
+  }
 
   /** One sync job; after a successful run, push subscriptions are created or renewed if due. */
   async handleSync(job: SyncJob) {
@@ -67,7 +82,14 @@ export class MailWorkerService {
     await boss.work(QUEUES.purge, async () => {
       await this.retention.purgeDue();
     });
+    await boss.work(QUEUES.slaSweep, async () => {
+      await this.sweep();
+    });
+    await boss.work<PushJob>(QUEUES.push, { localConcurrency: 4 }, async (jobs) => {
+      for (const job of jobs) await this.push.send(job.data);
+    });
     await boss.schedule(QUEUES.poll, SCHEDULES.poll);
+    await boss.schedule(QUEUES.slaSweep, SCHEDULES.slaSweep);
     await boss.schedule(QUEUES.subscriptions, SCHEDULES.subscriptions);
     await boss.schedule(QUEUES.purge, SCHEDULES.purge);
     // Catch up right away after a restart instead of waiting for the first tick.

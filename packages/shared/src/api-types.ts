@@ -209,6 +209,9 @@ export interface ThreadListItem {
   awaitingReplySince: string | null;
   snoozedUntil: string | null;
   followUpAt: string | null;
+  /** Reply due (business-hours SLA); null when no clock is running. */
+  slaDueAt: string | null;
+  slaBreachedAt: string | null;
 }
 
 export interface AttachmentInfo {
@@ -248,6 +251,8 @@ export interface ThreadDetail extends ThreadListItem {
   canShare: boolean;
   shares: { user: { id: string; name: string }; canReply: boolean }[];
   presence: PresenceEntry[];
+  canChangeStatus: boolean;
+  sla: ThreadSla;
 }
 
 export type ThreadCounts = Record<string, number>;
@@ -364,4 +369,62 @@ export interface RuleTestResult {
 export interface BulkResult {
   done: number;
   failed: { id: string; code: string }[];
+}
+
+// ── Status, SLA and notifications (Phase 6) ──
+export interface StatusHistoryEntry {
+  id: string;
+  from: string | null;
+  to: string;
+  source: 'USER' | 'SYSTEM' | 'INBOUND_MESSAGE' | 'OUTBOUND_MESSAGE' | 'AUTOMATION' | 'SLA';
+  changedBy: { id: string; name: string } | null;
+  reason: string | null;
+  createdAt: string;
+}
+
+export interface ThreadSla {
+  policy: { id: string; name: string } | null;
+  /** When the reply is due (first step that marks the conversation overdue). */
+  dueAt: string | null;
+  breachedAt: string | null;
+  /** The calendar the clock runs on (for showing local due times). */
+  timezone: string | null;
+  steps: { action: string; afterBusinessMinutes: number; dueAt: string | null; firedAt: string | null; marksOverdue: boolean }[];
+}
+
+export interface NotificationView {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  threadId: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface NotificationPrefs {
+  pushAvailable: boolean;
+  items: { type: string; label: string; description: string; inApp: boolean; push: boolean }[];
+}
+
+export interface CalendarView {
+  id: string;
+  name: string;
+  timezone: string;
+  weeklyHours: Record<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun', [string, string][]>;
+  holidays: { id: string; date: string; name: string }[];
+  departments: { id: string; name: string }[];
+  usedByPolicies: number;
+}
+
+export interface SlaPolicyView {
+  id: string;
+  name: string;
+  department: { id: string; name: string } | null;
+  priority: string | null;
+  calendar: { id: string; name: string; timezone: string };
+  isEnabled: boolean;
+  isDefault: boolean;
+  steps: { id: string; afterBusinessMinutes: number; action: string; marksOverdue: boolean }[];
+  canEdit: boolean;
 }

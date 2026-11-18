@@ -167,7 +167,7 @@ export type PermissionOverridesInput = z.infer<typeof permissionOverridesSchema>
 export type RolePermissionsInput = z.infer<typeof rolePermissionsSchema>;
 
 // ── Conversations (Phase 3) ──
-export const THREAD_VIEWS = ['inbox', 'mine', 'unassigned', 'unread', 'pending', 'waiting', 'followup', 'starred', 'snoozed', 'sent', 'archive', 'spam', 'trash', 'closed', 'all'] as const;
+export const THREAD_VIEWS = ['inbox', 'mine', 'unassigned', 'unread', 'pending', 'waiting', 'followup', 'starred', 'snoozed', 'sent', 'archive', 'spam', 'trash', 'closed', 'overdue', 'all'] as const;
 export type ThreadView = (typeof THREAD_VIEWS)[number];
 export const CONVERSATION_STATUSES = ['NEW', 'ASSIGNED', 'IN_PROGRESS', 'WAITING_FOR_CLIENT', 'PENDING_REPLY', 'FOLLOW_UP_REQUIRED', 'REPLY_NOT_NEEDED', 'CLOSED'] as const;
 export const PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const;
@@ -286,3 +286,71 @@ export const bulkSchema = z.object({
   departmentId: id.nullable().optional(),
   tagId: id.optional(),
 });
+
+// ── Status, SLA and notifications (Phase 6) ──
+
+/** Statuses an employee can choose. NEW / ASSIGNED follow the assignment; "OPEN" reopens to whichever applies. */
+export const MANUAL_STATUSES = ['IN_PROGRESS', 'WAITING_FOR_CLIENT', 'PENDING_REPLY', 'FOLLOW_UP_REQUIRED', 'REPLY_NOT_NEEDED', 'CLOSED', 'OPEN'] as const;
+export const statusChangeSchema = z
+  .object({
+    status: z.enum(MANUAL_STATUSES),
+    reason: z.string().trim().max(500).optional(),
+    /** Turns the conversation into "Follow-up required" at this time unless the client writes first. */
+    followUpAt: z.coerce.date().nullable().optional(),
+  })
+  .refine((v) => !v.followUpAt || !['CLOSED', 'REPLY_NOT_NEEDED'].includes(v.status), { path: ['followUpAt'], message: 'A closed conversation has no follow-up date' })
+  .refine((v) => !v.followUpAt || v.followUpAt.getTime() > Date.now() - 60_000, { path: ['followUpAt'], message: 'The follow-up date must be in the future' });
+export const prioritySchema = z.object({ priority: z.enum(PRIORITIES) });
+
+const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$|^24:00$/, 'HH:MM');
+const daySpans = z.array(z.tuple([hhmm, hhmm])).max(6).default([]);
+export const weeklyHoursSchema = z.object({ mon: daySpans, tue: daySpans, wed: daySpans, thu: daySpans, fri: daySpans, sat: daySpans, sun: daySpans });
+export const calendarSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  timezone: z.string().min(1).max(64),
+  weeklyHours: weeklyHoursSchema,
+});
+export const holidaySchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD'), name: z.string().trim().min(1).max(100) });
+
+export const SLA_ACTIONS = ['NOTIFY_ASSIGNEE', 'REMIND_ASSIGNEE', 'ALERT_MANAGER', 'ESCALATE'] as const;
+export const slaPolicySchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  departmentId: id.nullable().default(null),
+  priority: z.enum(PRIORITIES).nullable().default(null),
+  calendarId: id,
+  isEnabled: z.boolean().default(true),
+  isDefault: z.boolean().default(false),
+  steps: z
+    .array(z.object({ afterBusinessMinutes: z.number().int().min(0).max(60 * 24 * 60), action: z.enum(SLA_ACTIONS), marksOverdue: z.boolean().default(false) }))
+    .min(1)
+    .max(10),
+});
+
+export const notificationListQuery = z.object({
+  unread: z.enum(['true', 'false']).optional().transform((v) => v === 'true'),
+  cursor: id.optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+});
+/** Notification kinds the system sends today (others in the database arrive with later phases). */
+export const NOTIFICATION_TYPES = [
+  { type: 'ASSIGNED', label: 'Assigned to me', description: 'A conversation is assigned to you' },
+  { type: 'REASSIGNED', label: 'Reassigned to me', description: 'A colleague hands a conversation over to you' },
+  { type: 'CLIENT_REPLIED', label: 'Client replied', description: 'New mail arrives in a conversation assigned to you' },
+  { type: 'NOTE_MENTION', label: 'Mentioned in a note', description: 'Someone @mentions you in an internal note' },
+  { type: 'FOLLOW_UP_DUE', label: 'Follow-up due', description: 'A follow-up date you set has come' },
+  { type: 'SLA_REMINDER', label: 'Reply reminders', description: 'A conversation of yours is waiting for a reply or about to be overdue' },
+  { type: 'SLA_OVERDUE', label: 'Overdue (managers)', description: 'A conversation in your team or department is overdue' },
+  { type: 'SLA_ESCALATED', label: 'Escalations', description: 'A conversation was escalated to management' },
+  { type: 'ACCOUNT_NEEDS_REAUTH', label: 'Mailbox needs reconnecting', description: 'A mailbox you connected lost access and must be reconnected' },
+] as const;
+export type ActiveNotificationType = (typeof NOTIFICATION_TYPES)[number]['type'];
+const notificationTypeEnum = z.enum(NOTIFICATION_TYPES.map((t) => t.type) as [ActiveNotificationType, ...ActiveNotificationType[]]);
+
+export const notificationPrefsSchema = z.object({
+  items: z.array(z.object({ type: notificationTypeEnum, inApp: z.boolean(), push: z.boolean() })).min(1).max(30),
+});
+export const pushSubscriptionSchema = z.object({
+  endpoint: z.string().url().max(1000),
+  keys: z.object({ p256dh: z.string().min(10).max(200), auth: z.string().min(4).max(100) }),
+});
+export const pushUnsubscribeSchema = z.object({ endpoint: z.string().url().max(1000) });

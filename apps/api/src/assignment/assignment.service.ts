@@ -7,7 +7,9 @@ import { AuditService } from '../audit/audit.service';
 import { Errors } from '../common/errors';
 import type { RequestContext } from '../common/request-context';
 import { EventsPublisher } from '../events/events.service';
+import { NotificationsService, type Outbox } from '../notifications/notifications.service';
 import { PrismaService, type Tx } from '../prisma/prisma.service';
+import { SlaService } from '../sla/sla.service';
 
 export interface AssignTarget {
   assigneeId?: string | null;
@@ -35,6 +37,8 @@ export class AssignmentService {
     private readonly access: AccessPolicy,
     private readonly audit: AuditService,
     private readonly events: EventsPublisher,
+    private readonly notifications: NotificationsService,
+    private readonly sla: SlaService,
   ) {}
 
   // ───────────── who may assign to whom ─────────────
@@ -110,6 +114,7 @@ export class AssignmentService {
    * current Assignment row remains and the thread always matches it.
    */
   async apply(threadId: string, target: AssignTarget, meta: AssignMeta): Promise<boolean> {
+    const pending: { outbox: Outbox | null } = { outbox: null };
     const changed = await this.prisma.$transaction(
       async (tx) => {
         await tx.$queryRaw(Prisma.sql`SELECT id FROM email_threads WHERE id = ${threadId} FOR UPDATE`);
@@ -146,16 +151,16 @@ export class AssignmentService {
           });
         }
         if (assigneeId && assigneeId !== t.assigneeId && assigneeId !== meta.actor?.userId) {
-          await tx.notification.create({
-            data: {
-              id: newId(),
+          pending.outbox = await this.notifications.createIn(tx, [
+            {
               userId: assigneeId,
               type: t.assigneeId ? 'REASSIGNED' : 'ASSIGNED',
-              title: `Assigned to you: ${t.subject}`.slice(0, 300),
+              title: `Assigned to you: ${t.subject}`,
+              body: meta.reason ?? null,
               threadId,
-              data: { method: meta.method, ruleId: meta.ruleId ?? null } as Prisma.InputJsonValue,
+              data: { method: meta.method, ruleId: meta.ruleId ?? null },
             },
-          });
+          ]);
         }
         await this.audit.record(tx, meta.actor ?? { userId: null, actorType: 'SYSTEM' }, {
           action: assigneeId || teamId || departmentId ? 'thread.assign' : 'thread.unassign',
@@ -169,7 +174,12 @@ export class AssignmentService {
       },
       { timeout: 15_000 },
     );
-    if (changed) await this.events.threadsChanged([threadId]);
+    if (pending.outbox) await this.notifications.flush(pending.outbox);
+    if (changed) {
+      // A new department or priority can mean a different SLA policy.
+      await this.sla.evaluate([threadId]).catch(() => undefined);
+      await this.events.threadsChanged([threadId]);
+    }
     return changed;
   }
 

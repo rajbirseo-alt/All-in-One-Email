@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
 import type { PermissionKey } from '@crm/shared';
 import { useSession } from '@/lib/session';
+import { NotificationBell } from './notification-bell';
 
 /**
  * Navigation lists only modules that are built and that the user may use.
@@ -17,6 +18,7 @@ const MAIL_NAV: { href: string; label: string; anyOf: PermissionKey[] }[] = [
 const NAV: { href: string; label: string; anyOf: PermissionKey[] }[] = [
   { href: '/admin/mailboxes', label: 'Mailboxes', anyOf: ['account.connect', 'account.manage'] },
   { href: '/admin/rules', label: 'Routing rules', anyOf: ['rules.manage'] },
+  { href: '/admin/sla', label: 'SLA & working hours', anyOf: ['sla.manage'] },
   { href: '/admin/users', label: 'Employees', anyOf: ['user.read'] },
   { href: '/admin/org', label: 'Departments & teams', anyOf: ['user.read', 'org.manage'] },
   { href: '/admin/roles', label: 'Roles & permissions', anyOf: ['role.manage'] },
@@ -70,6 +72,14 @@ export function AppShell({ children }: { children: ReactNode }) {
       >
         My account
       </Link>
+      <Link
+        href="/settings/notifications"
+        onClick={() => setOpen(false)}
+        aria-current={path.startsWith('/settings/notifications') ? 'page' : undefined}
+        className={`rounded-md px-2.5 py-1.5 ${path.startsWith('/settings/notifications') ? 'bg-accent-soft font-medium text-accent' : 'text-text-2 hover:bg-surface-2 hover:text-text'}`}
+      >
+        Notifications
+      </Link>
     </nav>
   );
 
@@ -84,6 +94,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span className="hidden sm:inline">SEO Discovery CRM</span>
         </Link>
         <div className="ml-auto flex items-center gap-3">
+          <NotificationBell />
           <div className="hidden text-right sm:block">
             <p className="text-[13px] leading-tight font-medium">{me.user.name}</p>
             <p className="text-[12px] leading-tight text-text-3">{me.user.role.name}</p>

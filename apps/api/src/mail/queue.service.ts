@@ -12,6 +12,10 @@ export const QUEUES = {
   flags: 'mail-flags',
   /** Outgoing mail (drafts approved by a human). */
   send: 'mail-send',
+  /** SLA steps and follow-up dates that have come due (every minute). */
+  slaSweep: 'sla-sweep',
+  /** Browser push for one notification. */
+  push: 'notify-push',
 } as const;
 
 export type FlagAction = 'read' | 'unread' | 'star' | 'unstar' | 'archive' | 'unarchive' | 'spam' | 'not-spam';
@@ -27,6 +31,16 @@ export interface SendJob {
   draftId: string;
   /** The approval this job belongs to; a cancelled and re-approved draft ignores older jobs. */
   approvedAt: string;
+}
+
+/** A browser push to every device of one employee. Carries no mail content beyond the notification title. */
+export interface PushJob {
+  userId: string;
+  title: string;
+  body: string | null;
+  /** Path in the web app to open on click. */
+  url: string;
+  tag: string;
 }
 
 export interface SyncJob {
@@ -75,7 +89,10 @@ export class QueueService implements OnModuleDestroy {
     if (!existing.has(QUEUES.send)) {
       await boss.createQueue(QUEUES.send, { policy: 'standard', retryLimit: 3, retryDelay: 20, retryBackoff: true, expireInSeconds: 600 });
     }
-    for (const name of [QUEUES.poll, QUEUES.subscriptions, QUEUES.purge]) {
+    if (!existing.has(QUEUES.push)) {
+      await boss.createQueue(QUEUES.push, { policy: 'standard', retryLimit: 2, retryDelay: 30, expireInSeconds: 300 });
+    }
+    for (const name of [QUEUES.poll, QUEUES.subscriptions, QUEUES.purge, QUEUES.slaSweep]) {
       if (!existing.has(name)) await boss.createQueue(name, { policy: 'singleton', retryLimit: 2 });
     }
   }
@@ -93,6 +110,11 @@ export class QueueService implements OnModuleDestroy {
   async enqueueSend(job: SendJob, startAfter?: Date): Promise<void> {
     const boss = await this.get();
     await boss.send(QUEUES.send, job, startAfter ? { startAfter } : {});
+  }
+
+  async enqueuePush(job: PushJob): Promise<void> {
+    const boss = await this.get();
+    await boss.send(QUEUES.push, job);
   }
 
   async onModuleDestroy() {

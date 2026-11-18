@@ -1,16 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import type { AssigneeOptions, BulkResult, DraftView, MailboxSummary, PresenceEntry, ThreadCounts, ThreadDetail, ThreadListItem } from '@crm/shared';
 import { api, ApiError } from '@/lib/api';
 import { useLoad } from '@/lib/hooks';
-import { formatAddresses, formatBytes, prefersDark, shortDate, who } from '@/lib/mail';
+import { formatAddresses, formatBytes, prefersDark, shortDate, slaBadge, STATUS_LABEL, STATUS_TONE, who } from '@/lib/mail';
+import { useLiveEvent } from '@/lib/live';
 import { useSession } from '@/lib/session';
 import { Badge, Button, ErrorBanner, Input, Select } from '@/components/ui';
 import { Composer } from '@/components/mail/composer';
 import { MessageFrame } from '@/components/mail/message-frame';
 import { CollabPanel } from '@/components/mail/collab-panel';
+import { StatusPanel } from '@/components/mail/status-panel';
 
 const VIEWS: { key: string; label: string }[] = [
   { key: 'inbox', label: 'Inbox' },
@@ -18,6 +20,7 @@ const VIEWS: { key: string; label: string }[] = [
   { key: 'unassigned', label: 'Unassigned' },
   { key: 'unread', label: 'Unread' },
   { key: 'pending', label: 'Awaiting reply' },
+  { key: 'overdue', label: 'Overdue' },
   { key: 'starred', label: 'Starred' },
   { key: 'snoozed', label: 'Snoozed' },
   { key: 'followup', label: 'Follow-up' },
@@ -45,9 +48,20 @@ function snoozeOptions() {
   ];
 }
 
-export default function InboxPage() {
+/** useSearchParams needs a Suspense boundary in the App Router. */
+export default function InboxRoute() {
+  return (
+    <Suspense fallback={<p className="p-6 text-text-3">Loading…</p>}>
+      <InboxPage />
+    </Suspense>
+  );
+}
+
+function InboxPage() {
   const { can, me } = useSession();
   const router = useRouter();
+  const params = useSearchParams();
+  const linked = params.get('thread');
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [bulkOptions, setBulkOptions] = useState<AssigneeOptions | null>(null);
   const [bulkNote, setBulkNote] = useState<string | null>(null);
@@ -103,32 +117,22 @@ export default function InboxPage() {
     void loadList();
   }, [loadList]);
 
-  // Live updates: refresh the list, counts and the open conversation when they change.
-  useEffect(() => {
-    const es = new EventSource('/api/v1/events');
-    let t: ReturnType<typeof setTimeout> | null = null;
-    es.addEventListener('thread.updated', (ev) => {
-      const ids = (JSON.parse((ev as MessageEvent).data) as { threadIds: string[] }).threadIds;
-      if (t) clearTimeout(t);
-      t = setTimeout(() => {
-        void loadList();
-        void counts.reload();
-        if (selectedRef.current && ids.includes(selectedRef.current)) void loadDetail(selectedRef.current, false);
-      }, 400);
-    });
-    es.addEventListener('presence', (ev) => {
-      const p = JSON.parse((ev as MessageEvent).data) as { threadId: string; users: PresenceEntry[] };
-      if (p.threadId === selectedRef.current) setPresence(p.users.filter((u) => u.userId !== me.user.id));
-    });
-    es.addEventListener('session.ended', () => {
-      es.close();
-      router.replace('/login');
-    });
-    return () => {
-      es.close();
-      if (t) clearTimeout(t);
-    };
-  }, [loadList, loadDetail, counts, router, me.user.id]);
+  // Live updates over the shared event stream: refresh the list, counts and the open conversation.
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useLiveEvent('thread.updated', (data) => {
+    const ids = (data as { threadIds: string[] }).threadIds ?? [];
+    if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    refreshTimer.current = setTimeout(() => {
+      void loadList();
+      void counts.reload();
+      if (selectedRef.current && ids.includes(selectedRef.current)) void loadDetail(selectedRef.current, false);
+    }, 400);
+  });
+  useLiveEvent('presence', (data) => {
+    const p = data as { threadId: string; users: PresenceEntry[] };
+    if (p.threadId === selectedRef.current) setPresence(p.users.filter((u) => u.userId !== me.user.id));
+  });
+  useEffect(() => () => void (refreshTimer.current && clearTimeout(refreshTimer.current)), []);
 
   // Tell colleagues who is looking at / replying to the open conversation (refreshed every 30 s).
   const composing = !!composer && !!selected;
@@ -186,6 +190,14 @@ export default function InboxPage() {
       void counts.reload();
     }
   };
+
+  // Opened from a notification (/inbox?thread=…): show that conversation, then drop the parameter.
+  useEffect(() => {
+    if (!linked) return;
+    void open(linked);
+    router.replace('/inbox');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linked]);
 
   const act = async (action: string) => {
     if (!detail) return;
@@ -347,7 +359,7 @@ export default function InboxPage() {
         <ul className="flex-1 overflow-y-auto">
           {!loading && !items.length && <li className="p-6 text-center text-[14px] text-text-3">{q ? 'No conversations match your search.' : 'Nothing here.'}</li>}
           {items.map((t) => (
-            <li key={t.id} className={`flex border-b border-border ${selected === t.id ? 'bg-accent-soft' : 'hover:bg-surface-2'}`}>
+            <li key={t.id} className={`flex border-b border-l-2 border-b-border ${t.slaDueAt && new Date(t.slaDueAt).getTime() <= Date.now() ? 'border-l-danger' : 'border-l-transparent'} ${selected === t.id ? 'bg-accent-soft' : 'hover:bg-surface-2'}`}>
               <input type="checkbox" aria-label={`Select ${t.subject}`} checked={checked.has(t.id)} onChange={() => toggle(t.id)} className="mt-3 ml-2.5 shrink-0" />
               <button onClick={() => void open(t.id)} className="block min-w-0 flex-1 px-3 py-2.5 text-left">
                 <div className="flex items-baseline justify-between gap-2">
@@ -371,7 +383,12 @@ export default function InboxPage() {
                       {tag.name}
                     </span>
                   ))}
-                  {t.awaitingReplySince && !t.isArchived && <Badge tone="warning">Awaiting reply</Badge>}
+                  {t.status !== 'NEW' && t.status !== 'ASSIGNED' && <Badge tone={STATUS_TONE[t.status]}>{STATUS_LABEL[t.status]}</Badge>}
+                  {(() => {
+                    const due = slaBadge(t.slaDueAt);
+                    if (due) return <Badge tone={due.tone}>{due.text}</Badge>;
+                    return t.awaitingReplySince && !t.isArchived && !['WAITING_FOR_CLIENT', 'REPLY_NOT_NEEDED', 'CLOSED'].includes(t.status) ? <Badge tone="warning">Awaiting reply</Badge> : null;
+                  })()}
                 </div>
               </button>
             </li>
@@ -407,7 +424,7 @@ export default function InboxPage() {
                 </button>
                 <h1 className="text-[18px] font-semibold break-words">{detail.subject}</h1>
                 <p className="text-[13px] text-text-3">
-                  {detail.account.emailAddress} · {detail.status.replace(/_/g, ' ').toLowerCase()} · {detail.priority.toLowerCase()} priority
+                  {detail.account.emailAddress} · {STATUS_LABEL[detail.status]} · {detail.priority.toLowerCase()} priority
                 </p>
                 {presence.length > 0 && (
                   <p className="mt-1 text-[12.5px] font-medium text-warning" role="status">
@@ -510,7 +527,8 @@ export default function InboxPage() {
               <p className="text-[13px] text-text-3">You can read this conversation but not reply from {detail.account.emailAddress}.</p>
             )}
             </div>
-            <div className="xl:order-last">
+            <div className="flex flex-col gap-3 xl:order-last">
+              <StatusPanel thread={detail} onChanged={() => (void loadDetail(detail.id, images), void loadList(), void counts.reload())} />
               <CollabPanel thread={detail} onChanged={() => (void loadDetail(detail.id, images), void loadList())} />
             </div>
             </div>

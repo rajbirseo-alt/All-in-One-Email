@@ -10,6 +10,7 @@ import { ApiException, Errors } from '../common/errors';
 import type { RequestContext } from '../common/request-context';
 import { EventsPublisher } from '../events/events.service';
 import type { FlagAction } from '../mail/queue.service';
+import { NotificationsService, type Outbox } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ThreadActionsService } from '../threads/thread-actions.service';
 import { AssignmentService } from './assignment.service';
@@ -30,6 +31,7 @@ export class CollabService {
     private readonly assignment: AssignmentService,
     private readonly actions: ThreadActionsService,
     private readonly events: EventsPublisher,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private async visible(ctx: RequestContext, threadId: string, permission: 'conversation.read' | 'conversation.share' = 'conversation.read') {
@@ -73,16 +75,20 @@ export class CollabService {
     const t = await this.visible(ctx, threadId);
     const mentions = await this.mentionedUsers(body);
     const id = newId();
+    const pending: { outbox: Outbox | null } = { outbox: null };
     await this.prisma.$transaction(async (tx) => {
       await tx.internalNote.create({ data: { id, threadId, authorId: ctx.userId, body } });
       await tx.noteMention.createMany({ data: mentions.map((userId) => ({ noteId: id, userId })) });
-      await tx.notification.createMany({
-        data: mentions
+      const author = (await tx.user.findUnique({ where: { id: ctx.userId }, select: { name: true } }))?.name ?? 'A colleague';
+      pending.outbox = await this.notifications.createIn(
+        tx,
+        mentions
           .filter((u) => u !== ctx.userId)
-          .map((userId) => ({ id: newId(), userId, type: 'NOTE_MENTION' as const, title: `You were mentioned: ${t.subject}`.slice(0, 300), threadId, data: { noteId: id } })),
-      });
+          .map((userId) => ({ userId, type: 'NOTE_MENTION' as const, title: `${author} mentioned you: ${t.subject}`, threadId, data: { noteId: id } })),
+      );
       await this.audit.record(tx, ctx, { action: 'note.create', entityType: 'EmailThread', entityId: threadId, metadata: { noteId: id, mentions } });
     });
+    if (pending.outbox) await this.notifications.flush(pending.outbox);
     await this.events.threadsChanged([threadId]);
     return (await this.notes(ctx, threadId)).find((n) => n.id === id)!;
   }

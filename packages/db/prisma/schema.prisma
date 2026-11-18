@@ -535,6 +535,7 @@ model EmailThread {
   slaPolicyId        String?
   slaDueAt           DateTime?
   slaBreachedAt      DateTime?
+  slaNextAt          DateTime? // when the next SLA step of the current waiting cycle is due (sweeper index)
   followUpAt         DateTime?
   closedAt           DateTime?
   version            Int                @default(0) // optimistic locking for collision detection
@@ -567,6 +568,8 @@ model EmailThread {
   @@index([departmentId, status])
   @@index([teamId, status])
   @@index([status, slaDueAt])
+  @@index([slaNextAt])
+  @@index([followUpAt])
   @@index([contactId])
   @@index([snoozedUntil])
   @@index([emailAccountId, normalizedSubject])

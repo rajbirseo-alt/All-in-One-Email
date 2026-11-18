@@ -1,9 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, type FolderType } from '@crm/db';
 import { newId } from '@crm/crypto';
 import { normalizeSubject, type NormalizedMessage } from '@crm/providers';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsPublisher } from '../events/events.service';
+import { SlaService } from '../sla/sla.service';
+import { StatusService, type MailChange } from '../status/status.service';
+
+/** Mail older than this before the mailbox was connected is imported history. */
+const HISTORY_GRACE_MS = 5 * 60_000;
 
 export interface FolderRef {
   id: string;
@@ -33,9 +38,13 @@ const json = (v: unknown) => v as Prisma.InputJsonValue;
  */
 @Injectable()
 export class IngestService {
+  private readonly log = new Logger(IngestService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: EventsPublisher,
+    private readonly status: StatusService,
+    private readonly sla: SlaService,
   ) {}
 
   emptyResult(): IngestResult {
@@ -195,6 +204,8 @@ export class IngestService {
    */
   async refreshThreads(threadIds: Iterable<string>) {
     const ids = [...threadIds];
+    const changes: MailChange[] = [];
+    const slaDirty: string[] = [];
     for (const threadId of ids) {
       const msgs = await this.prisma.emailMessage.findMany({
         where: { threadId },
@@ -241,7 +252,7 @@ export class IngestService {
         awaitingReplySince: unanswered?.receivedAt ?? null,
         firstResponseAt: firstIn ? (outbound.find((m) => m.receivedAt > firstIn)?.receivedAt ?? null) : null,
       };
-      const before = await this.prisma.emailThread.findUnique({ where: { id: threadId } });
+      const before = await this.prisma.emailThread.findUnique({ where: { id: threadId }, include: { emailAccount: { select: { createdAt: true } } } });
       if (!before) continue;
       const changed = (Object.keys(data) as (keyof typeof data)[]).some((k) => {
         const a = before[k];
@@ -251,7 +262,19 @@ export class IngestService {
       // The version (collision check) only moves when the set of messages changes, not on read/star/archive.
       const messagesChanged = before.messageCount !== data.messageCount || before.lastMessageAt.getTime() !== data.lastMessageAt.getTime();
       if (changed) await this.prisma.emailThread.update({ where: { id: threadId }, data: { ...data, ...(messagesChanged ? { version: { increment: 1 } } : {}) } });
+      const later = (a: Date | null, b: Date | null) => !!a && (!b || a.getTime() > b.getTime());
+      const newInbound = later(data.lastInboundAt, before.lastInboundAt);
+      const newOutbound = later(data.lastOutboundAt, before.lastOutboundAt);
+      if (newInbound || newOutbound) {
+        const newest = Math.max(newInbound ? data.lastInboundAt!.getTime() : 0, newOutbound ? data.lastOutboundAt!.getTime() : 0);
+        changes.push({ threadId, created: before.messageCount === 0, newInbound, newOutbound, live: newest >= before.emailAccount.createdAt.getTime() - HISTORY_GRACE_MS });
+      }
+      if (newInbound || newOutbound || (before.awaitingReplySince?.getTime() ?? null) !== (data.awaitingReplySince?.getTime() ?? null) || before.isSpam !== data.isSpam || before.isTrashed !== data.isTrashed) slaDirty.push(threadId);
     }
+    // Status re-assessment first (it can stop the clock), then the SLA clock.
+    // A failure here must not fail the sync (the messages are stored); the minute sweep and the next change catch up.
+    if (changes.length) await this.status.afterMail(changes).catch((e: Error) => this.log.error(`Status re-assessment failed: ${e.message}`));
+    if (slaDirty.length) await this.sla.evaluate(slaDirty).catch((e: Error) => this.log.error(`SLA evaluation failed: ${e.message}`));
     // Live updates: open inboxes refetch these threads (ids only; recipients are filtered per user).
     if (ids.length) await this.events.threadsChanged(ids).catch(() => undefined);
   }

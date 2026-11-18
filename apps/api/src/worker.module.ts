@@ -10,8 +10,9 @@ import { AttachmentsService } from './threads/attachments.service';
 import { SendService } from './compose/send.service';
 import { RetentionService } from './mail/retention.service';
 import { PrismaService } from './prisma/prisma.service';
+import { PushService } from './notifications/push.service';
 
-/** The background worker: mail sync, push renewal, retention purge. No HTTP server. */
+/** The background worker: mail sync, push renewal, retention purge, SLA steps, browser push. No HTTP server. */
 @Module({})
 export class WorkerModule {
   static register(cfg: AppConfig, opts: { mailEndpoints?: MailEndpoints } = {}): DynamicModule {
@@ -27,6 +28,7 @@ export class WorkerModule {
         FlagPushService,
         AttachmentsService,
         SendService,
+        PushService,
         MailWorkerService,
       ],
     };

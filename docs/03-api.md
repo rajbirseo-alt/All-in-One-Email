@@ -73,11 +73,12 @@ Webhook handlers only dedupe the event and enqueue a sync. They return 202 withi
 | GET | `/threads` | `view=all\|mine\|assigned\|unassigned\|unread\|pending\|waiting\|followup\|closed\|sent\|drafts\|archive\|spam\|overdue` plus filters `accountId[] departmentId[] assigneeId[] from to dateFrom dateTo subject status[] priority[] tagId[] q` |
 | GET | `/threads/counts` | Badge counts: unread for inbox/mine/unassigned, totals for the other views |
 | GET | `/threads/:id` | Thread + messages + attachments metadata + notes + assignment and status history |
-| PATCH | `/threads/:id` | `{priority?, followUpAt?}` |
 | POST | `/threads/:id/read` · `/unread` · `/star` · `/unstar` · `/archive` · `/unarchive` · `/spam` · `/not-spam` | Pushed back to the provider by the `flag.push` job |
 | POST | `/threads/:id/snooze` | `{until}` |
-| POST | `/threads/:id/status` | 🔒 `conversation.status` — `{status, reason?}` |
-| GET | `/events` | Server-Sent Events: `thread.updated {threadIds}` (filtered per user), `session.ended`. Replaces the WebSocket plan below for Phase 3 |
+| POST | `/threads/:id/status` | 🔒 `conversation.status` — `{status, reason?, followUpAt?}`. Status is one of IN_PROGRESS, WAITING_FOR_CLIENT, PENDING_REPLY, FOLLOW_UP_REQUIRED, REPLY_NOT_NEEDED, CLOSED or OPEN (reopens to NEW/ASSIGNED; NEW and ASSIGNED otherwise follow the assignment). `followUpAt` turns the conversation into FOLLOW_UP_REQUIRED at that time. *(Phase 6)* |
+| POST | `/threads/:id/priority` | 🔒 `conversation.status` — `{priority}`; re-picks the SLA policy *(Phase 6)* |
+| GET | `/threads/:id/status-history` | Status changes with source (user, client message, our reply, system) *(Phase 6)* |
+| GET | `/events` | Server-Sent Events: `thread.updated {threadIds}` (filtered per user), `presence`, `notification` (only on the owner's streams; the client refetches its bell), `session.ended`. Replaces the WebSocket plan below |
 | POST | `/threads/bulk` | `{threadIds[], action, assigneeId?/teamId?/departmentId?, tagId?}`, max 500, synchronous; returns `{done, failed[]}` |
 | GET | `/search?q=` | Full-text over authorised threads (subject, participants, body) |
 | GET | `/messages/:id/raw` | *(later)* 🔒 `conversation.raw` — original headers for debugging |
@@ -111,10 +112,13 @@ Webhook handlers only dedupe the event and enqueue a sync. They return 202 withi
 ## SLA & notifications — Phase 6
 | Method | Path | Notes |
 |---|---|---|
-| CRUD | `/sla-policies`, `/sla-policies/:id/steps`, `/calendars`, `/calendars/:id/holidays` | 🔒 `sla.manage` |
-| GET | `/notifications?unread=true` · POST `/notifications/:id/read` · POST `/notifications/read-all` | |
-| GET/PUT | `/notification-preferences` | |
-| POST/DELETE | `/push-subscriptions` | Web Push subscribe and unsubscribe |
+| GET/POST · PUT/DELETE `:id` | `/sla-policies` | 🔒 `sla.manage`. A policy is saved with its steps (`{name, departmentId, priority, calendarId, isEnabled, isDefault, steps[{afterBusinessMinutes, action, marksOverdue}]}`), replacing the planned `/steps` sub-resource. Exactly one step marks overdue; one enabled policy per department + priority. Department managers manage only their own departments' policies |
+| GET/POST · PUT/DELETE `:id` | `/calendars` | 🔒 `sla.manage`; writes need company-wide scope. `{name, timezone, weeklyHours{mon..sun: [["09:30","18:30"]]}}` |
+| POST · DELETE `:holidayId` | `/calendars/:id/holidays` | `{date: YYYY-MM-DD, name}` |
+| GET | `/notifications?unread=&cursor=&limit=` · `/notifications/unread-count` · POST `/notifications/:id/read` · POST `/notifications/read-all` | Signed in; always the caller's own |
+| GET/PUT | `/notification-preferences` | Per kind: `inApp` (bell) and `push` (devices) |
+| GET | `/push-subscriptions/config` | `{enabled, publicKey}` (VAPID) |
+| GET · POST · DELETE | `/push-subscriptions` | This browser's Web Push subscription. Endpoints must belong to a browser push service (FCM, Mozilla, Windows, Apple) |
 
 ## CRM & leads — Phase 7
 | Method | Path | Notes |

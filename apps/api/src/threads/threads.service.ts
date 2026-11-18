@@ -9,6 +9,8 @@ import type { RequestContext } from '../common/request-context';
 import { PrismaService } from '../prisma/prisma.service';
 import { sanitizeEmailHtml, textToHtml } from './email-html';
 import { EventsHub } from '../events/events.service';
+import { SlaService } from '../sla/sla.service';
+import { StatusService } from '../status/status.service';
 
 const listInclude = {
   emailAccount: { select: { id: true, emailAddress: true, displayName: true, provider: true } },
@@ -25,7 +27,7 @@ const listInclude = {
 } satisfies Prisma.EmailThreadInclude;
 type ListRow = Prisma.EmailThreadGetPayload<{ include: typeof listInclude }>;
 
-const COUNT_VIEWS: ThreadView[] = ['inbox', 'mine', 'unassigned', 'unread', 'pending', 'starred', 'snoozed', 'followup'];
+const COUNT_VIEWS: ThreadView[] = ['inbox', 'mine', 'unassigned', 'unread', 'pending', 'starred', 'snoozed', 'followup', 'overdue'];
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
 
 function encodeCursor(t: { lastMessageAt: Date; id: string }) {
@@ -43,6 +45,8 @@ export class ThreadsService {
     private readonly prisma: PrismaService,
     private readonly access: AccessPolicy,
     private readonly hub: EventsHub,
+    private readonly status: StatusService,
+    private readonly sla: SlaService,
   ) {}
 
   /** Conditions of each sidebar view. Spam and trash only appear in their own views. */
@@ -78,6 +82,8 @@ export class ThreadsService {
         return { isTrashed: true };
       case 'closed':
         return { ...clean, status: 'CLOSED' };
+      case 'overdue':
+        return { ...clean, slaDueAt: { lte: now }, awaitingReplySince: { not: null }, status: { notIn: ['WAITING_FOR_CLIENT', 'REPLY_NOT_NEEDED', 'CLOSED'] } };
       case 'all':
         return clean;
     }
@@ -166,6 +172,8 @@ export class ThreadsService {
       awaitingReplySince: iso(r.awaitingReplySince),
       snoozedUntil: iso(r.snoozedUntil),
       followUpAt: iso(r.followUpAt),
+      slaDueAt: iso(r.slaDueAt),
+      slaBreachedAt: iso(r.slaBreachedAt),
     };
   }
 
@@ -236,6 +244,8 @@ export class ThreadsService {
       canShare: !!ctx.permissions['conversation.share'] && (await this.prisma.emailThread.count({ where: { AND: [{ id }, await this.access.threadWhere(ctx, 'conversation.share')] } })) > 0,
       shares: (await this.prisma.threadShare.findMany({ where: { threadId: id }, include: { user: { select: { id: true, name: true } } } })).map((s) => ({ user: s.user, canReply: s.canReply })),
       presence: this.hub.presenceFor(id).filter((p) => p.userId !== ctx.userId),
+      canChangeStatus: await this.status.canChange(ctx, id),
+      sla: await this.sla.describe(id),
     };
   }
 }

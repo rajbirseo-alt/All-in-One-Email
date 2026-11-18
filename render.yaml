@@ -79,6 +79,13 @@ projects:
                 sync: false
               - key: GMAIL_PUSH_SERVICE_ACCOUNT # service account set on the Pub/Sub push subscription
                 sync: false
+              # Browser push notifications (optional): npx web-push generate-vapid-keys
+              - key: VAPID_PUBLIC_KEY
+                sync: false
+              - key: VAPID_PRIVATE_KEY
+                sync: false
+              - key: VAPID_SUBJECT # e.g. mailto:it@seodiscovery.com
+                sync: false
 
           - type: worker
             name: crm-worker
@@ -168,6 +175,21 @@ projects:
                   type: pserv
                   name: crm-api
                   envVarKey: GMAIL_PUSH_SERVICE_ACCOUNT
+              - key: VAPID_PUBLIC_KEY
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: VAPID_PUBLIC_KEY
+              - key: VAPID_PRIVATE_KEY
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: VAPID_PRIVATE_KEY
+              - key: VAPID_SUBJECT
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: VAPID_SUBJECT
 
           - type: web
             name: crm-web

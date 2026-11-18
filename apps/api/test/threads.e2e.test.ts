@@ -151,7 +151,7 @@ describe('views, search and paging', () => {
   it('returns sidebar counts', async () => {
     const c = (await admin.get('/threads/counts')).body;
     expect(c.unread).toBeGreaterThanOrEqual(3);
-    expect(Object.keys(c).sort()).toEqual(['followup', 'inbox', 'mine', 'pending', 'snoozed', 'starred', 'unassigned', 'unread']);
+    expect(Object.keys(c).sort()).toEqual(['followup', 'inbox', 'mine', 'overdue', 'pending', 'snoozed', 'starred', 'unassigned', 'unread']);
   });
 });
 
