@@ -9,11 +9,17 @@ import { NotificationBell } from './notification-bell';
 
 /**
  * Navigation lists only modules that are built and that the user may use.
- * CRM, reports etc. appear here in the phases that deliver their backends.
+ * Reports etc. appear here in the phases that deliver their backends.
  */
 const MAIL_NAV: { href: string; label: string; anyOf: PermissionKey[] }[] = [
   { href: '/inbox', label: 'Inbox', anyOf: ['conversation.read'] },
   { href: '/settings/compose', label: 'Signatures & templates', anyOf: ['conversation.reply'] },
+];
+const CRM_NAV: { href: string; label: string; anyOf: PermissionKey[] }[] = [
+  { href: '/contacts', label: 'Contacts', anyOf: ['contact.read'] },
+  { href: '/companies', label: 'Companies', anyOf: ['contact.read'] },
+  { href: '/leads', label: 'Leads', anyOf: ['lead.read'] },
+  { href: '/tasks', label: 'Tasks', anyOf: ['task.read'] },
 ];
 const NAV: { href: string; label: string; anyOf: PermissionKey[] }[] = [
   { href: '/admin/mailboxes', label: 'Mailboxes', anyOf: ['account.connect', 'account.manage'] },
@@ -31,6 +37,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const items = NAV.filter((n) => n.anyOf.some(can));
   const mailItems = MAIL_NAV.filter((n) => n.anyOf.some(can));
+  const crmItems = CRM_NAV.filter((n) => n.anyOf.some(can));
   const fullHeight = path.startsWith('/inbox');
   const link = (n: { href: string; label: string }) => {
     const active = path.startsWith(n.href);
@@ -61,6 +68,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           {mailItems.map(link)}
         </>
       )}
+      {crmItems.length > 0 && <p className="px-2 pt-4 pb-2 text-[11px] font-semibold tracking-wider text-text-3 uppercase">CRM</p>}
+      {crmItems.map(link)}
       {items.length > 0 && <p className="px-2 pt-4 pb-2 text-[11px] font-semibold tracking-wider text-text-3 uppercase">Administration</p>}
       {items.map(link)}
       <p className="px-2 pt-4 pb-2 text-[11px] font-semibold tracking-wider text-text-3 uppercase">You</p>

@@ -6,6 +6,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EventsPublisher } from '../events/events.service';
 import { SlaService } from '../sla/sla.service';
 import { StatusService, type MailChange } from '../status/status.service';
+import { ContactLinkService } from '../crm/contact-link.service';
+import { LeadsService } from '../crm/leads.service';
 
 /** Mail older than this before the mailbox was connected is imported history. */
 const HISTORY_GRACE_MS = 5 * 60_000;
@@ -45,6 +47,8 @@ export class IngestService {
     private readonly events: EventsPublisher,
     private readonly status: StatusService,
     private readonly sla: SlaService,
+    private readonly contacts: ContactLinkService,
+    private readonly leads: LeadsService,
   ) {}
 
   emptyResult(): IngestResult {
@@ -275,6 +279,9 @@ export class IngestService {
     // A failure here must not fail the sync (the messages are stored); the minute sweep and the next change catch up.
     if (changes.length) await this.status.afterMail(changes).catch((e: Error) => this.log.error(`Status re-assessment failed: ${e.message}`));
     if (slaDirty.length) await this.sla.evaluate(slaDirty).catch((e: Error) => this.log.error(`SLA evaluation failed: ${e.message}`));
+    // CRM: match each conversation to its contact (creating it on first sight); our first reply moves a new lead to Contacted.
+    if (ids.length) await this.contacts.linkThreads(ids).catch((e: Error) => this.log.error(`Contact matching failed: ${e.message}`));
+    if (changes.length) await this.leads.afterMail(changes).catch((e: Error) => this.log.error(`Lead update failed: ${e.message}`));
     // Live updates: open inboxes refetch these threads (ids only; recipients are filtered per user).
     if (ids.length) await this.events.threadsChanged(ids).catch(() => undefined);
   }

@@ -13,6 +13,7 @@ import { Composer } from '@/components/mail/composer';
 import { MessageFrame } from '@/components/mail/message-frame';
 import { CollabPanel } from '@/components/mail/collab-panel';
 import { StatusPanel } from '@/components/mail/status-panel';
+import { CrmPanel } from '@/components/mail/crm-panel';
 
 const VIEWS: { key: string; label: string }[] = [
   { key: 'inbox', label: 'Inbox' },
@@ -529,6 +530,7 @@ function InboxPage() {
             </div>
             <div className="flex flex-col gap-3 xl:order-last">
               <StatusPanel thread={detail} onChanged={() => (void loadDetail(detail.id, images), void loadList(), void counts.reload())} />
+              {(can('contact.read') || can('lead.read') || can('task.read')) && <CrmPanel thread={detail} />}
               <CollabPanel thread={detail} onChanged={() => (void loadDetail(detail.id, images), void loadList())} />
             </div>
             </div>

@@ -260,6 +260,9 @@ export const assignmentRuleSchema = z
     departmentId: id.nullable().optional(),
     strategy: z.enum(['DIRECT', 'ROUND_ROBIN', 'LEAST_LOADED']).default('DIRECT'),
     setPriority: z.enum(PRIORITIES).nullable().optional(),
+    /** Also open a sales lead for the conversation (owner = whoever the rule assigns), with a follow-up task. */
+    createLead: z.boolean().default(false),
+    leadServiceInterest: z.string().trim().max(80).nullable().optional(),
   })
   .refine(
     (r) => (r.targetType === 'USER' ? !!r.targetUserId && r.strategy === 'DIRECT' : r.targetType === 'TEAM' ? !!r.teamId : !!r.departmentId),
@@ -342,6 +345,9 @@ export const NOTIFICATION_TYPES = [
   { type: 'SLA_OVERDUE', label: 'Overdue (managers)', description: 'A conversation in your team or department is overdue' },
   { type: 'SLA_ESCALATED', label: 'Escalations', description: 'A conversation was escalated to management' },
   { type: 'ACCOUNT_NEEDS_REAUTH', label: 'Mailbox needs reconnecting', description: 'A mailbox you connected lost access and must be reconnected' },
+  { type: 'LEAD_ASSIGNED', label: 'Lead assigned to me', description: 'A sales lead is created for you or handed over to you' },
+  { type: 'TASK_ASSIGNED', label: 'Task assigned to me', description: 'A colleague gives you a task' },
+  { type: 'TASK_DUE', label: 'Task due', description: 'One of your tasks reaches its due time' },
 ] as const;
 export type ActiveNotificationType = (typeof NOTIFICATION_TYPES)[number]['type'];
 const notificationTypeEnum = z.enum(NOTIFICATION_TYPES.map((t) => t.type) as [ActiveNotificationType, ...ActiveNotificationType[]]);
@@ -354,3 +360,154 @@ export const pushSubscriptionSchema = z.object({
   keys: z.object({ p256dh: z.string().min(10).max(200), auth: z.string().min(4).max(100) }),
 });
 export const pushUnsubscribeSchema = z.object({ endpoint: z.string().url().max(1000) });
+
+// ───────────── CRM: contacts, companies, leads, tasks (Phase 7) ─────────────
+
+export const CONTACT_TYPES = ['CLIENT', 'PROSPECT', 'VENDOR', 'PARTNER', 'CANDIDATE', 'OTHER'] as const;
+export const LEAD_STATUSES = ['NEW', 'CONTACTED', 'FOLLOW_UP', 'INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATION', 'WON', 'LOST'] as const;
+export const OPEN_LEAD_STATUSES = ['NEW', 'CONTACTED', 'FOLLOW_UP', 'INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATION'] as const;
+
+/** Empty strings become null, so a cleared field is stored as "no value". */
+const optText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .transform((v) => v || null)
+    .nullable()
+    .optional();
+const website = z
+  .string()
+  .trim()
+  .max(300)
+  .transform((v) => v || null)
+  .refine((v) => v === null || /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}(\/\S*)?$/i.test(v), 'Enter a web address like example.com')
+  .nullable()
+  .optional();
+const phone = z
+  .string()
+  .trim()
+  .max(40)
+  .transform((v) => v || null)
+  .refine((v) => v === null || /^[+()\d\s.-]{5,40}$/.test(v), 'Use digits, spaces and + ( ) - only')
+  .nullable()
+  .optional();
+const domain = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(253)
+  .transform((v) => v.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '') || null)
+  .refine((v) => v === null || /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(v), 'Enter a domain like example.com')
+  .nullable()
+  .optional();
+
+export const contactListQuery = z.object({
+  q: z.string().trim().max(200).optional(),
+  type: z.enum(CONTACT_TYPES).optional(),
+  ownerId: id.optional(),
+  companyId: id.optional(),
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+export const contactFieldsSchema = z.object({
+  name: optText(200),
+  phone,
+  companyId: id.nullable().optional(),
+  website,
+  country: optText(80),
+  type: z.enum(CONTACT_TYPES).optional(),
+  ownerId: id.nullable().optional(),
+  departmentId: id.nullable().optional(),
+  notes: optText(10_000),
+});
+export const contactCreateSchema = contactFieldsSchema.extend({
+  emails: z.array(email).min(1, 'Add at least one email address').max(20),
+});
+export const contactEmailSchema = z.object({ email, isPrimary: z.boolean().default(false) });
+export const contactTagsSchema = z.object({ tagIds: z.array(id).max(50) });
+export const mergeSchema = z.object({
+  sourceContactIds: z.array(id).min(1).max(20),
+  dryRun: z.boolean().default(false),
+});
+export const dismissDuplicateSchema = z.object({ aId: id, bId: id }).refine((v) => v.aId !== v.bId, 'Choose two different contacts');
+
+export const companySchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  domain,
+  website,
+  country: optText(80),
+});
+export const companyListQuery = z.object({
+  q: z.string().trim().max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+const money = z.coerce.number().min(0).max(999_999_999_999).nullable().optional();
+const currency = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^[A-Z]{3}$/, 'Use a three-letter currency code, e.g. USD')
+  .optional();
+
+export const leadListQuery = z.object({
+  status: z.enum(LEAD_STATUSES).optional(),
+  ownerId: id.optional(),
+  q: z.string().trim().max(200).optional(),
+});
+export const leadCreateSchema = z
+  .object({
+    /** From a conversation: the contact is the conversation's contact. */
+    threadId: id.optional(),
+    contactId: id.optional(),
+    title: z.string().trim().min(1).max(300).optional(),
+    ownerId: id.nullable().optional(),
+    estimatedValue: money,
+    currency,
+    serviceInterest: optText(80),
+  })
+  .refine((v) => !!v.threadId || !!v.contactId, 'Choose a conversation or a contact');
+export const leadUpdateSchema = z.object({
+  title: z.string().trim().min(1).max(300).optional(),
+  ownerId: id.nullable().optional(),
+  estimatedValue: money,
+  currency,
+  serviceInterest: optText(80),
+});
+export const leadStatusSchema = z
+  .object({
+    status: z.enum(LEAD_STATUSES),
+    note: optText(1000),
+    lostReason: optText(500),
+  })
+  .refine((v) => v.status !== 'LOST' || !!v.lostReason, { message: 'Say why the lead was lost', path: ['lostReason'] });
+export const leadSummaryQuery = z.object({
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+});
+
+export const TASK_STATUSES = ['OPEN', 'DONE', 'CANCELLED'] as const;
+export const taskListQuery = z.object({
+  view: z.enum(['mine', 'created', 'all']).default('mine'),
+  status: z.enum(TASK_STATUSES).optional(),
+  threadId: id.optional(),
+  leadId: id.optional(),
+  contactId: id.optional(),
+});
+export const taskCreateSchema = z.object({
+  title: z.string().trim().min(1).max(300),
+  description: optText(5000),
+  dueAt: z.coerce.date().nullable().optional(),
+  assigneeId: id.optional(),
+  threadId: id.nullable().optional(),
+  leadId: id.nullable().optional(),
+  contactId: id.nullable().optional(),
+});
+export const taskUpdateSchema = z.object({
+  title: z.string().trim().min(1).max(300).optional(),
+  description: optText(5000),
+  dueAt: z.coerce.date().nullable().optional(),
+  assigneeId: id.optional(),
+});

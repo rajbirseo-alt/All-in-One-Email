@@ -120,15 +120,39 @@ Webhook handlers only dedupe the event and enqueue a sync. They return 202 withi
 | GET | `/push-subscriptions/config` | `{enabled, publicKey}` (VAPID) |
 | GET · POST · DELETE | `/push-subscriptions` | This browser's Web Push subscription. Endpoints must belong to a browser push service (FCM, Mozilla, Windows, Apple) |
 
-## CRM & leads — Phase 7
+## CRM & leads — Phase 7 (as built)
+
+**Scopes.** Records outside the caller's scope return 404.
+- **Contacts.** OWN means contacts the caller owns. TEAM and DEPARTMENT add contacts owned by those people; DEPARTMENT also adds contacts filed under the department. At every scope, the contact of a conversation or lead the caller can read is also visible.
+- **Leads.** OWN means the caller is the owner. TEAM adds leads owned by team members and leads from the team's queue. DEPARTMENT adds the department's leads.
+- **Tasks.** OWN means tasks assigned to or created by the caller. TEAM and DEPARTMENT add those people's tasks.
+
 | Method | Path | Notes |
 |---|---|---|
-| CRUD | `/contacts`, `/contacts/:id/emails`, `/companies` | Scoped by owner or department |
-| GET | `/contacts/:id/timeline` | Every authorised thread, lead and task for the contact |
-| GET | `/contacts/duplicates` | Candidate pairs with scores (same email domain + name similarity, same phone) |
-| POST | `/contacts/:id/merge` | `{sourceContactIds[]}` → preview with `?dryRun=true`, then commit |
-| CRUD | `/leads` · POST `/leads/:id/status` | 🔒 `lead.*` |
-| CRUD | `/tasks` · POST `/tasks/:id/complete` | |
+| GET · POST | `/contacts` | 🔒 `contact.read` / `contact.write`. List: `?q&type&ownerId&companyId&page&limit` → `{items,total}`. Create: `{emails[], name, phone, companyId, website, country, type, ownerId?, departmentId?, notes}`. An address another contact already has → 409 `EMAIL_IN_USE`. Owner and department must stay within the caller's scope (422) |
+| GET · PUT | `/contacts/:id` | A merged contact's id returns the contact it was merged into. Includes `canEdit`, `canMerge`, `merges[]` |
+| POST · DELETE | `/contacts/:id/emails`, `/contacts/:id/emails/:emailId` · POST `…/:emailId/primary` | The last address cannot be removed (409 `LAST_EMAIL`) |
+| PUT | `/contacts/:id/tags` | `{tagIds[]}` (the same tags as conversations) |
+| GET | `/contacts/:id/timeline` | `{threads, leads, tasks}`, each filtered by its own scope |
+| GET | `/contacts/owner-options` | People the caller may give contacts to |
+| GET · POST `dismiss` | `/contacts/duplicates` | 🔒 `contact.merge`. Returns pairs `{a, b, score, reasons[]}`. Matches on: the same phone (last 10 digits); a similar name at the same company (trigram ≥ 0.5); the same full name (≥ 0.8); the same mailbox name at another domain. `{aId,bId}` dismisses a pair |
+| POST | `/contacts/:id/merge` | 🔒 `contact.merge`. `{sourceContactIds[], dryRun}` (or `?dryRun=true`) → `{moves, fills, conflicts}`; a commit also returns `mergeIds`. Empty target fields are filled from the source and notes are appended; for other differences the target's value is kept |
+| POST | `/contact-merges/:id/undo` | 🔒 `contact.merge`. 409 `ALREADY_UNDONE` / `TARGET_MERGED` |
+| GET · POST · GET/PUT `:id` | `/companies` | The domain is normalised (`https://www.x.com/a` → `x.com`). A free-mail domain → 422; a taken one → 409 `DOMAIN_IN_USE` |
+| GET · POST | `/leads` | 🔒 `lead.read` / `lead.write`. List: `?status&ownerId&q`. Create from `{threadId}` (the contact comes from the conversation; 409 `LEAD_EXISTS` if it already has an open lead) or from `{contactId}`, plus `title, ownerId, estimatedValue, currency, serviceInterest`. The owner defaults to the caller |
+| GET · PUT | `/leads/:id` | Detail with `history`, `tasks` and `sourceThread` (only if the caller can read it). A new owner is notified (`LEAD_ASSIGNED`) |
+| POST | `/leads/:id/status` | `{status, note?, lostReason?}`. LOST needs a reason. WON makes the contact a client |
+| GET | `/leads/summary` · `/leads/owner-options` | Summary: `?from&to` → counts per stage, open/won/lost, conversion, won value per currency, figures per owner |
+| GET · POST · GET/PUT `:id` | `/tasks` | 🔒 `task.*`. `?view=mine\|created\|all&status&threadId&leadId&contactId`. The assignee must be within the caller's `task.write` scope, and linked records must be readable |
+| POST | `/tasks/:id/complete` · `/reopen` · `/cancel` | |
+| GET | `/tasks/assignee-options` | |
+| GET | `/threads/:id/crm` | 🔒 `conversation.read`. `{contact, leads, tasks, canCreateLead, canCreateTask}` for the panel next to a conversation |
+
+**Automatic behaviour**
+- **Contact matching.** Every synced or sent conversation is matched to the person outside the company. When the sender is our own domain or a robot (for example a website form), the Reply-To address is used. The contact, and the company for its domain, are created the first time they are seen.
+- **Lead routing.** An assignment rule with `createLead` opens a lead for the person it assigned. That person gets a `LEAD_ASSIGNED` notification and a follow-up task due in 24 hours. No lead is opened if the sender already has an open one.
+- **Lead stage.** Our first reply on the lead's conversation moves it from New to Contacted.
+- **Task reminders.** The worker's minute sweep sends one `TASK_DUE` notification per due time.
 
 ## AI & automation — Phase 8
 | Method | Path | Notes |

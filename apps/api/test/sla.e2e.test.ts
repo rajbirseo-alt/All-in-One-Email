@@ -416,7 +416,7 @@ describe('notifications', () => {
     expect(prefs.body.items.find((i: { type: string }) => i.type === 'ASSIGNED')).toMatchObject({ inApp: true, push: true });
     const put = await agent.put('/notification-preferences', { items: [{ type: 'ASSIGNED', inApp: false, push: false }] });
     expect(put.body.items.find((i: { type: string }) => i.type === 'ASSIGNED')).toMatchObject({ inApp: false, push: false });
-    expect((await agent.put('/notification-preferences', { items: [{ type: 'LEAD_ASSIGNED', inApp: false, push: false }] })).status).toBe(422);
+    expect((await agent.put('/notification-preferences', { items: [{ type: 'URGENT_EMAIL', inApp: false, push: false }] })).status).toBe(422);
 
     const before = (await notes(people.agent!.id, 'ASSIGNED')).length;
     const id = await receive({ date: new Date(), subject: 'Quiet assignment' });

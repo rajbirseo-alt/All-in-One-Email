@@ -70,6 +70,8 @@ export class RulesService {
         department: r.department,
         strategy: r.strategy,
         setPriority: r.setPriority,
+        createLead: r.createLead,
+        leadServiceInterest: r.leadServiceInterest,
         canEdit: true,
       });
     }
@@ -102,6 +104,8 @@ export class RulesService {
       departmentId: input.targetType === 'DEPARTMENT' ? input.departmentId! : null,
       strategy: input.targetType === 'USER' ? ('DIRECT' as const) : input.strategy,
       setPriority: input.setPriority ?? null,
+      createLead: input.createLead,
+      leadServiceInterest: input.createLead ? (input.leadServiceInterest ?? null) : null,
     };
   }
 

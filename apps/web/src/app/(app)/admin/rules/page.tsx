@@ -24,9 +24,11 @@ type Form = {
   departmentId: string;
   strategy: keyof typeof STRATEGY;
   setPriority: string;
+  createLead: boolean;
+  leadServiceInterest: string;
 };
 
-const blank: Form = { id: null, name: '', isEnabled: true, match: 'all', conditions: [{ field: 'mailbox', op: 'is', value: '' }], targetType: 'TEAM', targetUserId: '', teamId: '', departmentId: '', strategy: 'ROUND_ROBIN', setPriority: '' };
+const blank: Form = { id: null, name: '', isEnabled: true, match: 'all', conditions: [{ field: 'mailbox', op: 'is', value: '' }], targetType: 'TEAM', targetUserId: '', teamId: '', departmentId: '', strategy: 'ROUND_ROBIN', setPriority: '', createLead: false, leadServiceInterest: '' };
 
 export default function RulesPage() {
   const { me } = useSession();
@@ -55,6 +57,8 @@ export default function RulesPage() {
       departmentId: f.targetType === 'DEPARTMENT' ? f.departmentId : null,
       strategy: f.targetType === 'USER' ? 'DIRECT' : f.strategy,
       setPriority: f.setPriority || null,
+      createLead: f.createLead,
+      leadServiceInterest: f.createLead ? f.leadServiceInterest || null : null,
     };
     await api(f.id ? `/assignment-rules/${f.id}` : '/assignment-rules', { method: f.id ? 'PATCH' : 'POST', body });
     setForm(null);
@@ -84,6 +88,8 @@ export default function RulesPage() {
       departmentId: r.department?.id ?? '',
       strategy: r.strategy,
       setPriority: r.setPriority ?? '',
+      createLead: r.createLead,
+      leadServiceInterest: r.leadServiceInterest ?? '',
     });
   const describe = (c: { field: string; op: string; value: string }) =>
     `${FIELDS[c.field as keyof typeof FIELDS]} ${OPS[c.op as keyof typeof OPS]} “${c.field === 'mailbox' ? mailboxName(c.value) : c.value}”`;
@@ -105,7 +111,7 @@ export default function RulesPage() {
               <li key={r.id} className="flex flex-wrap items-start justify-between gap-2 border-b border-border px-4 py-3 last:border-0">
                 <div className="min-w-0">
                   <p className="font-medium">
-                    {i + 1}. {r.name} {!r.isEnabled && <Badge>off</Badge>} {r.setPriority && <Badge tone="warning">{r.setPriority.toLowerCase()} priority</Badge>}
+                    {i + 1}. {r.name} {!r.isEnabled && <Badge>off</Badge>} {r.setPriority && <Badge tone="warning">{r.setPriority.toLowerCase()} priority</Badge>} {r.createLead && <Badge tone="success">creates a lead{r.leadServiceInterest ? ` (${r.leadServiceInterest})` : ''}</Badge>}
                   </p>
                   <p className="text-[13px] text-text-2">
                     If {r.conditions.match === 'all' ? 'all' : 'any'} of: {r.conditions.conditions.map(describe).join('; ')}
@@ -331,6 +337,19 @@ export default function RulesPage() {
             <label className="flex items-center gap-2 text-[14px]">
               <input type="checkbox" checked={form.isEnabled} onChange={(e) => setForm({ ...form, isEnabled: e.target.checked })} /> Rule is on
             </label>
+            <div className="rounded-md border border-border p-3">
+              <label className="flex items-center gap-2 text-[14px]">
+                <input type="checkbox" checked={form.createLead} onChange={(e) => setForm({ ...form, createLead: e.target.checked })} /> Also create a sales lead
+              </label>
+              <p className="mt-1 text-[12.5px] text-text-3">The person the rule assigns owns the lead, is notified and gets a follow-up task due in 24 hours. No second lead is opened while the sender already has an open one.</p>
+              {form.createLead && (
+                <div className="mt-2">
+                  <Field label="Service interest (optional)" htmlFor="r-svc">
+                    <Input id="r-svc" value={form.leadServiceInterest} maxLength={80} placeholder="e.g. SEO, PPC, Web development" onChange={(e) => setForm({ ...form, leadServiceInterest: e.target.value })} />
+                  </Field>
+                </div>
+              )}
+            </div>
           </div>
         </Modal>
       )}

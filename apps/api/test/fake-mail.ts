@@ -26,6 +26,7 @@ export interface GmailFakeMessage {
   date: Date;
   messageId: string;
   inReplyTo?: string;
+  replyTo?: string;
   attachment?: { filename: string; mime: string; size: number };
 }
 
@@ -313,6 +314,7 @@ export class FakeMail {
       { name: 'Message-ID', value: m.messageId },
       { name: 'Date', value: m.date.toUTCString() },
       ...(m.inReplyTo ? [{ name: 'In-Reply-To', value: m.inReplyTo }] : []),
+      ...(m.replyTo ? [{ name: 'Reply-To', value: m.replyTo }] : []),
     ];
     const plain = { mimeType: 'text/plain', headers: [{ name: 'Content-Type', value: 'text/plain; charset=UTF-8' }], body: { size: m.text.length, data: b64url(m.text) } };
     const textPart = m.html

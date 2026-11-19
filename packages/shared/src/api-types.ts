@@ -355,6 +355,8 @@ export interface AssignmentRuleView {
   department: { id: string; name: string } | null;
   strategy: 'DIRECT' | 'ROUND_ROBIN' | 'LEAST_LOADED';
   setPriority: string | null;
+  createLead: boolean;
+  leadServiceInterest: string | null;
   canEdit: boolean;
 }
 
@@ -398,6 +400,8 @@ export interface NotificationView {
   title: string;
   body: string | null;
   threadId: string | null;
+  /** Where clicking the notification goes. */
+  url: string;
   readAt: string | null;
   createdAt: string;
 }
@@ -427,4 +431,168 @@ export interface SlaPolicyView {
   isDefault: boolean;
   steps: { id: string; afterBusinessMinutes: number; action: string; marksOverdue: boolean }[];
   canEdit: boolean;
+}
+
+// ───────────── CRM (Phase 7) ─────────────
+
+export interface PersonRef {
+  id: string;
+  name: string;
+}
+
+export interface CompanyRef {
+  id: string;
+  name: string;
+  domain: string | null;
+}
+
+export interface ContactListItem {
+  id: string;
+  name: string | null;
+  primaryEmail: string | null;
+  emailCount: number;
+  company: CompanyRef | null;
+  type: string;
+  owner: PersonRef | null;
+  phone: string | null;
+  lastContactedAt: string | null;
+  tags: TagView[];
+}
+
+export interface ContactMergeView {
+  id: string;
+  source: { id: string; name: string | null; emails: string[] };
+  mergedBy: PersonRef | null;
+  createdAt: string;
+  undoneAt: string | null;
+  moved: { emails: number; threads: number; leads: number; tasks: number; tags: number };
+}
+
+export interface ContactDetail extends ContactListItem {
+  emails: { id: string; email: string; isPrimary: boolean }[];
+  website: string | null;
+  country: string | null;
+  department: PersonRef | null;
+  notes: string | null;
+  createdAt: string;
+  canEdit: boolean;
+  canMerge: boolean;
+  /** Merges into this contact (newest first); only for holders of contact.merge. */
+  merges: ContactMergeView[];
+}
+
+export interface TimelineThread {
+  id: string;
+  subject: string;
+  mailbox: string;
+  status: string;
+  messageCount: number;
+  lastMessageAt: string;
+  assignee: PersonRef | null;
+}
+
+export interface ContactTimeline {
+  threads: TimelineThread[];
+  leads: LeadListItem[];
+  tasks: TaskView[];
+}
+
+export interface DuplicatePair {
+  a: ContactListItem;
+  b: ContactListItem;
+  score: number;
+  reasons: string[];
+}
+
+export interface MergePreview {
+  target: ContactListItem;
+  sources: ContactListItem[];
+  moves: { emails: number; threads: number; leads: number; tasks: number; tags: number };
+  /** Target fields that are empty and will be filled from a source. */
+  fills: { field: string; value: string }[];
+  /** Both have a value and they differ: the target's value is kept. */
+  conflicts: { field: string; kept: string; dropped: string }[];
+  /** Set when the merge was committed. */
+  mergeIds?: string[];
+}
+
+export interface CompanyView extends CompanyRef {
+  website: string | null;
+  country: string | null;
+  contactCount: number;
+  openLeadCount: number;
+}
+
+export interface LeadListItem {
+  id: string;
+  title: string;
+  status: string;
+  source: string;
+  contact: { id: string; name: string | null; email: string | null };
+  company: CompanyRef | null;
+  owner: PersonRef | null;
+  department: PersonRef | null;
+  estimatedValue: string | null;
+  currency: string | null;
+  serviceInterest: string | null;
+  sourceThreadId: string | null;
+  openTasks: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LeadHistoryEntry {
+  id: string;
+  from: string | null;
+  to: string;
+  changedBy: PersonRef | null;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface LeadDetail extends LeadListItem {
+  lostReason: string | null;
+  wonAt: string | null;
+  lostAt: string | null;
+  /** The source conversation, when the caller can read it. */
+  sourceThread: { id: string; subject: string } | null;
+  history: LeadHistoryEntry[];
+  tasks: TaskView[];
+  canEdit: boolean;
+}
+
+export interface LeadSummary {
+  byStatus: { status: string; count: number }[];
+  open: number;
+  won: number;
+  lost: number;
+  /** won / (won + lost); null while nothing is decided. */
+  conversionRate: number | null;
+  wonValue: { currency: string; value: string }[];
+  byOwner: { owner: PersonRef | null; open: number; won: number; lost: number }[];
+}
+
+export interface TaskView {
+  id: string;
+  title: string;
+  description: string | null;
+  dueAt: string | null;
+  status: string;
+  assignee: PersonRef;
+  createdBy: PersonRef | null;
+  /** Links appear only when the caller may open them. */
+  thread: { id: string; subject: string } | null;
+  lead: { id: string; title: string } | null;
+  contact: { id: string; name: string | null } | null;
+  completedAt: string | null;
+  createdAt: string;
+  canEdit: boolean;
+}
+
+export interface ThreadCrm {
+  contact: (ContactListItem & { canEdit: boolean }) | null;
+  leads: LeadListItem[];
+  tasks: TaskView[];
+  canCreateLead: boolean;
+  canCreateTask: boolean;
 }

@@ -16,6 +16,8 @@ export interface NotifyInput {
   title: string;
   body?: string | null;
   threadId?: string | null;
+  /** Where a click goes; defaults to the conversation (or the bell). */
+  url?: string;
   data?: Record<string, unknown>;
 }
 
@@ -23,6 +25,12 @@ export interface NotifyInput {
 export interface Outbox {
   live: { userId: string; id: string }[];
   push: { userId: string; title: string; body: string | null; url: string; tag: string }[];
+}
+
+/** Stored with the notification; older rows fall back to their conversation. */
+function urlOf(n: { threadId: string | null; data: Prisma.JsonValue }) {
+  const u = (n.data as { url?: unknown } | null)?.url;
+  return typeof u === "string" && u.startsWith("/") ? u : n.threadId ? `/inbox?thread=${n.threadId}` : "/";
 }
 
 const emptyOutbox = (): Outbox => ({ live: [], push: [] });
@@ -56,11 +64,11 @@ export class NotificationsService {
       if (!isActive.has(n.userId)) continue;
       const p = pref.get(`${n.userId}:${n.type}`) ?? { inApp: true, push: true };
       const title = n.title.slice(0, 300);
-      const url = n.threadId ? `/inbox?thread=${n.threadId}` : '/notifications';
+      const url = n.url ?? (n.threadId ? `/inbox?thread=${n.threadId}` : '/');
       if (p.inApp) {
         const id = newId();
         await tx.notification.create({
-          data: { id, userId: n.userId, type: n.type, title, body: n.body ?? null, threadId: n.threadId ?? null, data: (n.data ?? {}) as Prisma.InputJsonValue },
+          data: { id, userId: n.userId, type: n.type, title, body: n.body ?? null, threadId: n.threadId ?? null, data: { ...(n.data ?? {}), url } as Prisma.InputJsonValue },
         });
         outbox.live.push({ userId: n.userId, id });
       }
@@ -105,7 +113,7 @@ export class NotificationsService {
     ]);
     const page = rows.slice(0, q.limit);
     return {
-      items: page.map((n) => ({ id: n.id, type: n.type, title: n.title, body: n.body, threadId: n.threadId, readAt: n.readAt?.toISOString() ?? null, createdAt: n.createdAt.toISOString() })),
+      items: page.map((n) => ({ id: n.id, type: n.type, title: n.title, body: n.body, threadId: n.threadId, url: urlOf(n), readAt: n.readAt?.toISOString() ?? null, createdAt: n.createdAt.toISOString() })),
       nextCursor: rows.length > q.limit ? page.at(-1)!.id : null,
       unread,
     };

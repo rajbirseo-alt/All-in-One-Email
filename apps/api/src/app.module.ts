@@ -56,6 +56,12 @@ import { SlaAdminService } from './sla/sla-admin.service';
 import { SlaController } from './sla/sla.controller';
 import { StatusService } from './status/status.service';
 import { StatusController } from './status/status.controller';
+import { CrmAccess } from './crm/crm-access';
+import { ContactLinkService } from './crm/contact-link.service';
+import { TasksService } from './crm/tasks.service';
+import { LeadsService } from './crm/leads.service';
+import { ContactsService } from './crm/contacts.service';
+import { CrmController } from './crm/crm.controller';
 
 /** Providers shared by the HTTP API and the worker process. */
 export function mailProviders(cfg: AppConfig, mailEndpoints?: MailEndpoints) {
@@ -64,6 +70,10 @@ export function mailProviders(cfg: AppConfig, mailEndpoints?: MailEndpoints) {
     EventsPublisher,
     AccessPolicyForMail,
     NotificationsService,
+    CrmAccess,
+    ContactLinkService,
+    TasksService,
+    LeadsService,
     SlaService,
     StatusService,
     AssignmentService,
@@ -90,7 +100,7 @@ export class AppModule {
     return {
       module: AppModule,
       imports: [ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 300 }])],
-      controllers: [AuthController, UsersController, RolesController, OrgController, AuditController, HealthController, MailboxController, WebhooksController, AssignmentController, StatusController, ThreadsController, ComposeController, EventsController, SlaController, NotificationsController],
+      controllers: [AuthController, UsersController, RolesController, OrgController, AuditController, HealthController, MailboxController, WebhooksController, AssignmentController, StatusController, CrmController, ThreadsController, ComposeController, EventsController, SlaController, NotificationsController],
       providers: [
         { provide: APP_CONFIG, useValue: cfg },
         { provide: SSO_PROVIDERS, useFactory: () => opts.ssoProviders ?? buildSsoProviders(cfg) },
@@ -120,6 +130,7 @@ export class AppModule {
         SignaturesService,
         TemplatesService,
         SlaAdminService,
+        ContactsService,
         // Order matters: rate-limit first, then authentication/authorisation.
         { provide: APP_GUARD, useClass: ThrottlerGuard },
         { provide: APP_GUARD, useClass: AuthGuard },

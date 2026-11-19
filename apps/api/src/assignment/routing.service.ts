@@ -3,6 +3,7 @@ import type { AssignmentRule } from '@crm/db';
 import type { Participant } from '@crm/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AssignmentService } from './assignment.service';
+import { LeadsService } from '../crm/leads.service';
 
 export interface RuleFacts {
   mailbox: string;
@@ -68,6 +69,7 @@ export class RoutingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly assignment: AssignmentService,
+    private readonly leads: LeadsService,
   ) {}
 
   /** Facts from the first inbound message of a thread. */
@@ -120,6 +122,8 @@ export class RoutingService {
         if (rule.targetType === 'USER') await this.assignment.apply(t.id, { assigneeId: rule.targetUserId }, meta);
         else await this.assignment.assignToPool(t.id, { teamId: rule.teamId, departmentId: rule.teamId ? null : rule.departmentId }, rule.strategy, meta);
         routed++;
+        // Lead routing: the rule also opens a sales lead, owned by whoever it just assigned.
+        if (rule.createLead) await this.leads.createFromRule(t.id, rule).catch((e: Error) => this.log.error(`Lead for ${t.id} failed: ${e.message}`));
       } catch (e) {
         this.log.error(`Routing ${t.id} failed: ${(e as Error).message}`);
       }

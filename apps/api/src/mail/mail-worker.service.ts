@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { FlagPushService } from './flag-push.service';
+import { TasksService } from '../crm/tasks.service';
 import { QUEUES, QueueService, type FlagJob, type PushJob, type SendJob, type SyncJob } from './queue.service';
 import { PushService } from '../notifications/push.service';
 import { SlaService } from '../sla/sla.service';
@@ -37,13 +38,15 @@ export class MailWorkerService {
     private readonly sla: SlaService,
     private readonly status: StatusService,
     private readonly push: PushService,
+    private readonly tasks: TasksService,
   ) {}
 
   /** Due SLA steps and follow-up dates (also called directly by tests with a fixed clock). */
   async sweep(now = new Date()) {
     const sla = await this.sla.sweep(now);
     const followUps = await this.status.followUpSweep(now);
-    return { sla, followUps };
+    const tasksDue = await this.tasks.dueSweep(now);
+    return { sla, followUps, tasksDue };
   }
 
   /** One sync job; after a successful run, push subscriptions are created or renewed if due. */

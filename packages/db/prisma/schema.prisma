@@ -232,6 +232,7 @@ model Department {
   threads         EmailThread[]
   assignments     Assignment[]
   contacts        Contact[]
+  leads           Lead[]
   slaPolicies     SlaPolicy[]
   templates       Template[]
   assignmentRules AssignmentRule[]
@@ -829,20 +830,22 @@ enum AssignmentStrategy {
 ///   Cond = { field: "toAddress"|"fromAddress"|"fromDomain"|"subject"|"body"|"emailAccountId"|"aiCategory",
 ///            op: "equals"|"contains"|"matches"|"in", value: string|string[] }
 model AssignmentRule {
-  id           String               @id
-  name         String
-  position     Int
-  isEnabled    Boolean              @default(true)
-  conditions   Json
-  targetType   AssignmentTargetType
-  targetUserId String?
-  teamId       String?
-  departmentId String?
-  strategy     AssignmentStrategy   @default(DIRECT)
-  setPriority  Priority?
-  createdById  String
-  createdAt    DateTime             @default(now())
-  updatedAt    DateTime             @updatedAt
+  id                  String               @id
+  name                String
+  position            Int
+  isEnabled           Boolean              @default(true)
+  conditions          Json
+  targetType          AssignmentTargetType
+  targetUserId        String?
+  teamId              String?
+  departmentId        String?
+  strategy            AssignmentStrategy   @default(DIRECT)
+  setPriority         Priority?
+  createLead          Boolean              @default(false) // also open a sales lead (owner = the assignee) with a follow-up task
+  leadServiceInterest String?
+  createdById         String
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
   team        Team?        @relation(fields: [teamId], references: [id])
   department  Department?  @relation(fields: [departmentId], references: [id])
@@ -1011,6 +1014,8 @@ model Contact {
   department Department?    @relation(fields: [departmentId], references: [id])
   mergedInto Contact?       @relation("ContactMerge", fields: [mergedIntoId], references: [id])
   mergedFrom Contact[]      @relation("ContactMerge")
+  mergesIn   ContactMerge[] @relation("MergeTarget")
+  mergesOut  ContactMerge[] @relation("MergeSource")
   emails     ContactEmail[]
   tags       ContactTag[]
   threads    EmailThread[]
@@ -1035,6 +1040,38 @@ model ContactEmail {
   @@index([contactId])
   @@index([email(ops: raw("gin_trgm_ops"))], type: Gin, map: "contact_emails_email_trgm_idx")
   @@map("contact_emails")
+}
+
+/// One source contact folded into a target. `moved` lists the rows that moved so an admin can undo it;
+/// `changes` holds the target fields the merge filled in ({field: {before, after}}).
+model ContactMerge {
+  id         String    @id
+  targetId   String
+  sourceId   String
+  moved      Json
+  changes    Json
+  mergedById String?
+  createdAt  DateTime  @default(now())
+  undoneAt   DateTime?
+  undoneById String?
+
+  target Contact @relation("MergeTarget", fields: [targetId], references: [id])
+  source Contact @relation("MergeSource", fields: [sourceId], references: [id])
+
+  @@index([targetId, createdAt])
+  @@index([sourceId])
+  @@map("contact_merges")
+}
+
+/// A pair an admin marked as "not the same person": hidden from the duplicate list. aId < bId.
+model ContactDuplicateDismissal {
+  aId           String
+  bId           String
+  dismissedById String?
+  createdAt     DateTime @default(now())
+
+  @@id([aId, bId])
+  @@map("contact_duplicate_dismissals")
 }
 
 model ContactTag {
@@ -1073,6 +1110,7 @@ model Lead {
   source          LeadSource
   status          LeadStatus @default(NEW)
   ownerId         String?
+  departmentId    String?
   estimatedValue  Decimal?   @db.Decimal(14, 2)
   currency        String?    @default("USD")
   serviceInterest String? // e.g. "SEO", "PPC", "Web Development"
@@ -1087,12 +1125,15 @@ model Lead {
   company       Company?            @relation(fields: [companyId], references: [id])
   sourceThread  EmailThread?        @relation(fields: [sourceThreadId], references: [id])
   owner         User?               @relation(fields: [ownerId], references: [id])
+  department    Department?         @relation(fields: [departmentId], references: [id])
   statusHistory LeadStatusHistory[]
   tasks         Task[]
 
   @@index([ownerId, status])
   @@index([status, createdAt])
   @@index([contactId])
+  @@index([departmentId])
+  @@index([sourceThreadId])
   @@map("leads")
 }
 
@@ -1118,19 +1159,20 @@ enum TaskStatus {
 }
 
 model Task {
-  id          String     @id
-  title       String
-  description String?
-  dueAt       DateTime?
-  status      TaskStatus @default(OPEN)
-  assigneeId  String
-  createdById String?
-  threadId    String?
-  leadId      String?
-  contactId   String?
-  completedAt DateTime?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  id            String     @id
+  title         String
+  description   String?
+  dueAt         DateTime?
+  status        TaskStatus @default(OPEN)
+  assigneeId    String
+  createdById   String?
+  threadId      String?
+  leadId        String?
+  contactId     String?
+  completedAt   DateTime?
+  dueNotifiedAt DateTime? // TASK_DUE sent for the current due date (cleared when it changes)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   assignee  User         @relation("TaskAssignee", fields: [assigneeId], references: [id])
   createdBy User?        @relation("TaskCreator", fields: [createdById], references: [id])
@@ -1139,6 +1181,10 @@ model Task {
   contact   Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
 
   @@index([assigneeId, status, dueAt])
+  @@index([status, dueAt])
+  @@index([threadId])
+  @@index([leadId])
+  @@index([contactId])
   @@map("tasks")
 }
 
@@ -1158,6 +1204,7 @@ enum NotificationType {
   URGENT_EMAIL
   ACCOUNT_NEEDS_REAUTH
   TASK_DUE
+  TASK_ASSIGNED
 }
 
 model Notification {

@@ -2,7 +2,7 @@
 
 A central place to connect every company mailbox (Gmail / Google Workspace, Microsoft 365 / Outlook, and IMAP/SMTP custom domains), with assignment, SLA tracking, CRM contacts and leads, AI-assisted drafting and management reporting.
 
-**Status:** Phase 1 (authentication, employees, permissions, database) is complete and deployed on Render. Phase 2 (Gmail + Microsoft 365 mailboxes) Phase 3 (unified inbox, reading, triage, reply/forward/send, live updates) Phase 5 (assignment, routing rules, notes, sharing, tags, presence) and Phase 6 (status, working-hours SLA, escalation, notification bell and browser push) are built and tested locally, and wait for verification with real mailboxes and devices: see [phase-2.md](docs/phases/phase-2.md), [phase-3.md](docs/phases/phase-3.md), [phase-5.md](docs/phases/phase-5.md) and [phase-6.md](docs/phases/phase-6.md).
+**Status:** Phase 1 (authentication, employees, permissions, database) is complete and deployed on Render. Phase 2 (Gmail + Microsoft 365 mailboxes), Phase 3 (unified inbox, reading, triage, reply/forward/send, live updates), Phase 5 (assignment, routing rules, notes, sharing, tags, presence), Phase 6 (status, working-hours SLA, escalation, notification bell and browser push) and Phase 7 (contacts, companies, duplicate merging, lead pipeline, tasks, lead routing) are built and tested locally, and wait for verification with real mailboxes and devices: see [phase-2.md](docs/phases/phase-2.md), [phase-3.md](docs/phases/phase-3.md), [phase-5.md](docs/phases/phase-5.md), [phase-6.md](docs/phases/phase-6.md) and [phase-7.md](docs/phases/phase-7.md).
 
 ## Design documents
 

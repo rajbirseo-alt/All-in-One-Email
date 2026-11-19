@@ -36,7 +36,7 @@ export function NotificationBell() {
     setOpen(false);
     if (!n.readAt) await api(`/notifications/${n.id}/read`, { method: 'POST' }).catch(() => undefined);
     void list.reload();
-    if (n.threadId) router.push(`/inbox?thread=${n.threadId}`);
+    router.push(n.url);
   };
 
   return (
