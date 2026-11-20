@@ -10,6 +10,7 @@ import { SendService } from '../compose/send.service';
 import { RetentionService } from './retention.service';
 import { SubscriptionService } from './subscription.service';
 import { SyncService } from './sync.service';
+import { ImapIdleService } from './imap-idle.service';
 
 /** Schedules (UTC). */
 export const SCHEDULES = {
@@ -39,6 +40,7 @@ export class MailWorkerService {
     private readonly status: StatusService,
     private readonly push: PushService,
     private readonly tasks: TasksService,
+    private readonly idle: ImapIdleService,
   ) {}
 
   /** Due SLA steps and follow-up dates (also called directly by tests with a fixed clock). */
@@ -58,7 +60,7 @@ export class MailWorkerService {
 
   async enqueuePoll() {
     const accounts = await this.prisma.emailAccount.findMany({
-      where: { status: { in: ['ACTIVE', 'ERROR', 'INITIAL_SYNC'] }, provider: { in: ['GMAIL', 'MICROSOFT'] } },
+      where: { status: { in: ['ACTIVE', 'ERROR', 'INITIAL_SYNC'] }, provider: { in: ['GMAIL', 'MICROSOFT', 'IMAP'] } },
       select: { id: true },
     });
     for (const a of accounts) await this.queue.enqueueSync(a.id, 'POLL');
@@ -97,6 +99,8 @@ export class MailWorkerService {
     await boss.schedule(QUEUES.purge, SCHEDULES.purge);
     // Catch up right away after a restart instead of waiting for the first tick.
     await this.enqueuePoll();
+    // IMAP push: one IDLE connection per mailbox.
+    await this.idle.start();
     this.log.log('Mail worker started');
   }
 }

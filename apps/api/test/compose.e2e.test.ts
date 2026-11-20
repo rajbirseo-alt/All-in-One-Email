@@ -10,7 +10,7 @@ import { AttachmentsService } from '../src/threads/attachments.service';
 import { AccessPolicy } from '../src/access/access-policy.service';
 import { attachmentBytes, FakeMail, mimeHeader } from './fake-mail';
 import { bootApp, type Client, clientAs, makeDepartment, makeUser, prisma } from './helpers';
-import { connectMailbox, daysAgo, gmailMessage, MAIL_ENV, uniqueMailbox } from './mail-helpers';
+import { connectMailbox, daysAgo, gmailMessage, MAIL_ENV, uniqueMailbox, workerServices } from './mail-helpers';
 
 let fake: FakeMail;
 let app: INestApplication;
@@ -46,7 +46,8 @@ beforeAll(async () => {
   ({ app } = await bootApp({ mailEndpoints: fake.endpoints(), env: MAIL_ENV }));
   sync = app.get(SyncService);
   const prismaSvc = app.get(PrismaService);
-  sender = new SendService(prismaSvc, sync, app.get(IngestService), new AttachmentsService(prismaSvc, app.get(AccessPolicy), sync));
+  void prismaSvc;
+  ({ sender } = await workerServices(app));
   adminId = (await makeUser({ role: 'SUPER_ADMIN' })).id;
   admin = await clientAs(app, adminId);
 

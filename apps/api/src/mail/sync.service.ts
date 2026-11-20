@@ -7,6 +7,9 @@ import {
   GmailClient,
   GraphClient,
   ProviderRequestError,
+  imapFlagState,
+  parseImapMessage,
+  type ImapClient,
   type NormalizedFolder,
   type NormalizedMessage,
 } from '@crm/providers';
@@ -76,14 +79,15 @@ export class SyncService {
    */
   async run(accountId: string, kind: SyncKind): Promise<SyncOutcome> {
     const account = await this.prisma.emailAccount.findUnique({ where: { id: accountId } });
-    if (!account || SKIP_STATUSES.has(account.status) || account.provider === 'IMAP') return 'skipped';
+    if (!account || SKIP_STATUSES.has(account.status)) return 'skipped';
 
     const log = await this.prisma.syncLog.create({ data: { id: newId(), emailAccountId: accountId, kind, status: 'RUNNING' } });
     const result = this.ingest.emptyResult();
     try {
       const initial = account.status === 'CONNECTING' || account.status === 'INITIAL_SYNC';
       if (account.provider === 'GMAIL') await this.syncGmail(account, initial, kind, result);
-      else await this.syncGraph(account, initial, result);
+      else if (account.provider === 'MICROSOFT') await this.syncGraph(account, initial, result);
+      else await this.syncImap(account, result);
       await this.ingest.refreshThreads(result.threadIds);
       // New conversations go through the assignment rules (history imported at connect does not).
       await this.routing.routeNew(result.threadIds).catch((e: Error) => this.log.error(`Routing failed: ${e.message}`));
@@ -309,6 +313,104 @@ export class SyncService {
     }
     // A message that left every synced folder was deleted or moved out of scope.
     result.removed += await this.ingest.removeOrphans(account.id, removedEverywhere, result.threadIds);
+  }
+
+  // ───────────────────────────── IMAP ─────────────────────────────
+
+  /**
+   * One pass over each synced folder: new UIDs above the folder's cursor are fetched and
+   * stored; then flags of the messages we hold in that folder (within the sync window) are
+   * compared, and UIDs that are gone are unlinked. A message in no synced folder is removed.
+   * A changed UIDVALIDITY means the server renumbered the folder: its links are dropped and the
+   * window is read again (stored messages dedupe by Message-ID).
+   */
+  private async syncImap(account: EmailAccount, result: IngestResult) {
+    const imap = await this.credentials.imap(account.id);
+    try {
+      const folders = await this.syncFolders(account, await imap.folders());
+      const target = this.target(account, folders);
+      const since = this.syncWindowStart(account);
+      const unlinked: string[] = [];
+      for (const folder of folders.values()) {
+        if (!folder.syncEnabled) continue;
+        await this.imapFolder(account, imap, folder, { ...target, folderScope: new Set([folder.id]) }, since, result, unlinked);
+      }
+      result.removed += await this.ingest.removeOrphans(account.id, unlinked, result.threadIds);
+    } finally {
+      await imap.close();
+    }
+  }
+
+  private async imapFolder(
+    account: EmailAccount,
+    imap: ImapClient,
+    folder: FolderRef & { providerFolderId: string },
+    target: IngestTarget,
+    since: Date,
+    result: IngestResult,
+    unlinked: string[],
+  ) {
+    const path = folder.providerFolderId;
+    const stored = await this.prisma.emailFolder.findUniqueOrThrow({ where: { id: folder.id }, select: { uidValidity: true, lastUid: true } });
+    let lastUid = Number(stored.lastUid ?? 0);
+    let found = lastUid ? await imap.uidsAfter(path, lastUid) : await imap.uidsSince(path, since);
+    if (stored.uidValidity !== null && stored.uidValidity !== found.state.uidValidity) {
+      this.log.warn(`IMAP folder ${path} of ${account.id} was renumbered (UIDVALIDITY changed); reading it again`);
+      const links = await this.prisma.messageFolder.findMany({ where: { folderId: folder.id }, select: { message: { select: { providerMessageId: true } } } });
+      await this.prisma.messageFolder.deleteMany({ where: { folderId: folder.id } });
+      unlinked.push(...links.map((l) => l.message.providerMessageId));
+      lastUid = 0;
+      found = await imap.uidsSince(path, since);
+    }
+    const firstRead = lastUid === 0;
+    const known = new Set(
+      (await this.prisma.messageFolder.findMany({ where: { folderId: folder.id, imapUid: { in: found.uids.map(BigInt) } }, select: { imapUid: true } })).map((r) => Number(r.imapUid)),
+    );
+    const todo = found.uids.filter((u) => !known.has(u));
+    for (let i = 0; i < todo.length; i += INGEST_BATCH) {
+      const batch = todo.slice(i, i + INGEST_BATCH);
+      const { messages } = await imap.fetchMessages(path, batch);
+      const parsed: NormalizedMessage[] = [];
+      for (const m of messages) {
+        try {
+          parsed.push(await parseImapMessage(m, path, found.state.uidValidity));
+        } catch (e) {
+          this.log.warn(`IMAP message ${path}#${m.uid} of ${account.id} could not be read: ${(e as Error).message}`);
+        }
+      }
+      await this.ingest.ingest(target, parsed, result);
+      // Progress is saved per batch, so an interrupted first import resumes where it stopped.
+      if (!firstRead) {
+        lastUid = Math.max(lastUid, ...batch);
+        await this.prisma.emailFolder.update({ where: { id: folder.id }, data: { lastUid: BigInt(lastUid), uidValidity: found.state.uidValidity } });
+      }
+    }
+    // Everything below UIDNEXT was either read now or is older than the window.
+    lastUid = Math.max(found.uids.reduce((a, b) => Math.max(a, b), lastUid), found.state.uidNext - 1, 0);
+
+    if (!firstRead) {
+      // Flags and deletions of what we hold here, within the sync window.
+      const links = await this.prisma.messageFolder.findMany({
+        where: { folderId: folder.id, imapUid: { not: null }, message: { receivedAt: { gte: since } } },
+        select: { messageId: true, imapUid: true, message: { select: { providerMessageId: true, isRead: true, isStarred: true, threadId: true } } },
+      });
+      const current = await imap.flagsOf(path, links.map((l) => Number(l.imapUid)));
+      for (const l of links) {
+        const flags = current.get(Number(l.imapUid));
+        if (!flags || imapFlagState(flags).isDeleted) {
+          await this.prisma.messageFolder.deleteMany({ where: { messageId: l.messageId, folderId: folder.id } });
+          unlinked.push(l.message.providerMessageId);
+          continue;
+        }
+        const f = imapFlagState(flags);
+        if (f.isRead !== l.message.isRead || f.isStarred !== l.message.isStarred) {
+          await this.prisma.emailMessage.update({ where: { id: l.messageId }, data: { isRead: f.isRead, isStarred: f.isStarred } });
+          result.updated++;
+          result.threadIds.add(l.message.threadId);
+        }
+      }
+    }
+    await this.prisma.emailFolder.update({ where: { id: folder.id }, data: { uidValidity: found.state.uidValidity, lastUid: BigInt(lastUid), lastSyncedAt: new Date() } });
   }
 }
 

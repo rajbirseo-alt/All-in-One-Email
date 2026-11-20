@@ -41,3 +41,24 @@ export function gmailMessage(box: string, id: string, over: Partial<GmailFakeMes
 }
 
 export type { INestApplication };
+
+/** Worker-only services (send, flag push) built from the API app's providers, as the worker wires them. */
+export async function workerServices(app: INestApplication) {
+  const { SendService } = await import('../src/compose/send.service');
+  const { FlagPushService } = await import('../src/mail/flag-push.service');
+  const { AttachmentsService } = await import('../src/threads/attachments.service');
+  const { SyncService } = await import('../src/mail/sync.service');
+  const { IngestService } = await import('../src/mail/ingest.service');
+  const { PrismaService } = await import('../src/prisma/prisma.service');
+  const { AccessPolicy } = await import('../src/access/access-policy.service');
+  const { CredentialService } = await import('../src/mail/credential.service');
+  const { MAIL_ENDPOINTS } = await import('../src/mail/mail-endpoints');
+  const prismaSvc = app.get(PrismaService);
+  const sync = app.get(SyncService);
+  const credentials = app.get(CredentialService);
+  const attachments = new AttachmentsService(prismaSvc, app.get(AccessPolicy), sync, credentials);
+  return {
+    sender: new SendService(prismaSvc, sync, app.get(IngestService), attachments, credentials, app.get(MAIL_ENDPOINTS)),
+    flags: new FlagPushService(prismaSvc, sync, credentials),
+  };
+}

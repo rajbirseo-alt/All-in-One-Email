@@ -85,6 +85,26 @@ Errors fall into four classes that drive retry behaviour:
 - **Disconnect**: revoke the token at the provider, delete the subscription or watch, delete the credential, set status DISCONNECTED and schedule the purge (02 §Retention).
 - **Sync health**: `consecutiveFailures ≥ 5` sets status `ERROR` and alerts admins. The health screen shows lag (now − newest provider timestamp seen).
 
+## 4a. IMAP / SMTP as built (Phase 4, 2026-11-20)
+
+- **Libraries:** imapflow (IMAP), mailparser (MIME), nodemailer (SMTP).
+- **Connect:** the form runs four checks: DNS, IMAP sign-in, folder list (an inbox must exist) and SMTP sign-in. Nothing is saved unless all pass. Presets exist for Zoho (.com and .in), Hostinger, GoDaddy, cPanel (`mail.<domain>`), Yahoo and iCloud.
+- **Storage:** the password is stored in `EmailCredential` (kind `PASSWORD`), envelope-encrypted like OAuth tokens. Host, port and security are kept in plain columns. A reconnect updates the password or settings and keeps the cursors.
+- **Transport policy (production):** implicit TLS or STARTTLS only, TLS ≥ 1.2, certificates verified. Hosts that resolve to private, loopback or link-local addresses are refused, so a typed-in server cannot reach our own network. Only the tests relax this, in code (`MailEndpoints.imap`), never through an environment variable.
+- **Message identity:** `providerMessageId` is `mid:<Message-ID>`, so one message has one row across folders (a move, or mail sent to oneself). Without a Message-ID it is `uid:<uidvalidity>:<uid>@<folder>`. Each folder copy is a `MessageFolder` row carrying its `imapUid`.
+- **Sync, per synced folder** (defaults: Inbox, Sent, Archive, Junk, custom folders):
+  - The first read searches `SINCE <window>`. After that, UIDs above `lastUid`.
+  - Already-stored UIDs are skipped, so an interrupted import resumes where it stopped.
+  - Then the flags of the folder's copies within the window are fetched: read/starred are updated, and UIDs that are gone (or flagged \\Deleted) are unlinked. A message left in no synced folder is removed.
+  - A changed UIDVALIDITY drops the folder's links and reads the window again; Message-IDs dedupe.
+  - CONDSTORE/QRESYNC are not used yet; the flag pass covers the window on every run.
+- **Threading:** In-Reply-To / References, otherwise the same normalised subject (4+ characters) with the same sender or recipients within 30 days.
+- **Push:** the worker's `ImapIdleService` keeps one IDLE connection per active IMAP mailbox on its inbox. EXISTS queues a sync (debounced 1.5 s). It reconnects with backoff (5 s doubling up to 5 min), and imapflow re-issues IDLE every 25 minutes. The 5-minute poll includes IMAP. That is at most 2 connections per mailbox (IDLE + sync).
+- **Send:** SMTP with Bcc only in the envelope (the Bcc header is never sent). Then the full copy is APPENDed to Sent unless a message with that Message-ID is already there (servers that file their own copy). Once SMTP accepts, the draft is marked (`providerDraftId = smtp-accepted:<Message-ID>`), so a retry never sends twice; it only finishes the Sent copy. A failed APPEND does not fail the send.
+- **CRM actions:** read and star set \\Seen / \\Flagged on every copy. Archive moves the inbox copy to the Archive folder, spam to Junk, and back. The folder and UID are captured when the action is taken, because the local links change at once.
+- **Attachments:** metadata is stored at sync. Content is fetched on demand by downloading the message from one of its folders and taking the part out.
+- **Errors:** a refused login → `AuthError` (the mailbox goes to NEEDS_REAUTH). Network, timeout and 4xx SMTP → `TransientError` (retried). Certificate/TLS problems → a non-retried error with the reason.
+
 ## 5a. As built in Phase 2 (2026-11-17)
 
 Where the implementation differs from or narrows the plan above:

@@ -25,6 +25,11 @@ export interface FlagJob {
   action: FlagAction;
   /** Stored message ids the action applies to. */
   messageIds: string[];
+  /**
+   * IMAP: where each copy was (folder path, type, UID) before the action changed the local
+   * folder links, so the worker can find it on the server.
+   */
+  imapRefs?: { path: string; type: string; uid: number }[];
 }
 
 export interface SendJob {

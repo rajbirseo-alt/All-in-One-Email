@@ -12,7 +12,7 @@ import { AttachmentsService } from '../src/threads/attachments.service';
 import { AccessPolicy } from '../src/access/access-policy.service';
 import { FakeMail } from './fake-mail';
 import { bootApp, type Client, clientAs, makeDepartment, makeUser, prisma } from './helpers';
-import { connectMailbox, daysAgo, gmailMessage, MAIL_ENV, uniqueMailbox } from './mail-helpers';
+import { connectMailbox, daysAgo, gmailMessage, MAIL_ENV, uniqueMailbox, workerServices } from './mail-helpers';
 
 let fake: FakeMail;
 let app: INestApplication;
@@ -222,7 +222,8 @@ describe('notes, shares, tags, bulk, presence', () => {
 
     // A reply sent afterwards contains nothing from the note.
     const prismaSvc = app.get(PrismaService);
-    const sender = new SendService(prismaSvc, sync, app.get(IngestService), new AttachmentsService(prismaSvc, app.get(AccessPolicy), sync));
+    void prismaSvc;
+    const { sender } = await workerServices(app);
     const d = (await admin.post('/drafts', { mode: 'REPLY', threadId: t.id })).body;
     await admin.post(`/drafts/${d.id}/send`, { baseThreadVersion: d.baseThreadVersion });
     const boss = await app.get(QueueService).get();

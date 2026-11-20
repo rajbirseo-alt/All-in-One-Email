@@ -6,6 +6,7 @@ import type { DepartmentDetail, MailboxDetail, MailboxProvidersResponse, Mailbox
 import { api } from '@/lib/api';
 import { useAction, useLoad } from '@/lib/hooks';
 import { useSession } from '@/lib/session';
+import { ImapConnectModal } from '@/components/imap-connect';
 import { Badge, Button, Card, Empty, ErrorBanner, Field, Input, Modal, PageHeader, Select, Table, Td, formatDate } from '@/components/ui';
 
 const STATUS: Record<MailboxStatus, { label: string; tone: 'neutral' | 'accent' | 'success' | 'warning' | 'danger' }> = {
@@ -49,6 +50,7 @@ function MailboxesPage() {
   const list = useLoad(() => api<MailboxSummary[]>('/accounts'), []);
   const providers = useLoad(() => (canConnect || canManage ? api<MailboxProvidersResponse>('/accounts/providers') : Promise.resolve(null)), [canConnect, canManage]);
   const [connectFor, setConnectFor] = useState<'google' | 'microsoft' | null>(null);
+  const [imapOpen, setImapOpen] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
 
   const connected = params.get('connected');
@@ -82,6 +84,7 @@ function MailboxesPage() {
                   Connect Microsoft 365
                 </Button>
               )}
+              {providers.data?.imap && <Button onClick={() => setImapOpen(true)}>Connect other (IMAP)</Button>}
             </div>
           )
         }
@@ -104,7 +107,7 @@ function MailboxesPage() {
       )}
       {canConnect && providers.data && !providers.data.gmail && !providers.data.microsoft && (
         <div className="mb-4 rounded-md bg-warning-soft px-4 py-3 text-[14px] text-warning">
-          No mail provider is configured on the server yet. Add the Google and/or Microsoft client credentials to the API environment.
+          Google and Microsoft sign-in are not set up on the server yet (add their client credentials to the API environment). IMAP mailboxes such as Zoho or Hostinger can be connected now.
         </div>
       )}
       <ErrorBanner error={list.error} />
@@ -155,6 +158,9 @@ function MailboxesPage() {
         New mail arrives within seconds when push is on; every mailbox is also checked every 5 minutes. Conversations will be readable in the inbox (next phase).
       </p>
 
+      {imapOpen && providers.data && (
+        <ImapConnectModal providers={providers.data} onClose={() => setImapOpen(false)} onConnected={(id) => (setImapOpen(false), router.replace(`/admin/mailboxes?connected=${encodeURIComponent(id)}`), void list.reload())} />
+      )}
       {connectFor && providers.data && <ConnectModal provider={connectFor} providers={providers.data} onClose={() => setConnectFor(null)} />}
       {openId && (
         <DetailModal
@@ -259,7 +265,9 @@ function DetailModal({ id, providers, onClose }: { id: string; providers: Mailbo
     await api(`/accounts/${id}${path}`, { method, body });
     await detail.reload();
   });
+  const [imapEdit, setImapEdit] = useState(false);
   const reconnect = useAction(async () => {
+    if (d!.provider === 'IMAP') return setImapEdit(true);
     const provider = d!.provider === 'GMAIL' ? 'google' : 'microsoft';
     const { url } = await api<{ url: string }>(`/accounts/oauth/${provider}/start`, { method: 'POST', body: { departmentId: d!.department?.id ?? null } });
     window.location.assign(url);
@@ -280,6 +288,15 @@ function DetailModal({ id, providers, onClose }: { id: string; providers: Mailbo
     });
 
   const inactive = d?.status === 'DISCONNECTED';
+  if (imapEdit && d && providers)
+    return (
+      <ImapConnectModal
+        providers={providers}
+        existing={{ id: d.id, emailAddress: d.emailAddress, displayName: d.displayName, departmentId: d.department?.id ?? null }}
+        onClose={() => setImapEdit(false)}
+        onConnected={() => (setImapEdit(false), void detail.reload())}
+      />
+    );
   return (
     <Modal open wide onClose={onClose} title={d ? d.emailAddress : 'Mailbox'}>
       <ErrorBanner error={detail.error ?? act.error ?? reconnect.error} />
@@ -314,6 +331,7 @@ function DetailModal({ id, providers, onClose }: { id: string; providers: Mailbo
                 <Button onClick={() => confirm('Re-read the whole import window? Stored mail is not duplicated.') && void act.run('/sync?full=true')}>Full resync</Button>
               </>
             )}
+            {d.provider === 'IMAP' && !inactive && d.status !== 'NEEDS_REAUTH' && can('account.connect') && <Button onClick={() => setImapEdit(true)}>Change password or server</Button>}
             {!inactive && d.status !== 'PAUSED' && <Button onClick={() => void act.run('/pause')}>Pause</Button>}
             {d.status === 'PAUSED' && <Button onClick={() => void act.run('/resume')}>Resume</Button>}
             {!inactive && (

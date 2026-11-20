@@ -173,6 +173,8 @@ export interface MailboxDetail extends MailboxSummary {
 export interface MailboxProvidersResponse {
   gmail: boolean;
   microsoft: boolean;
+  /** IMAP/SMTP needs no server-side setup: always available. */
+  imap: boolean;
   gmailPush: boolean;
   microsoftPush: boolean;
   initialSyncDays: number;
@@ -595,4 +597,19 @@ export interface ThreadCrm {
   tasks: TaskView[];
   canCreateLead: boolean;
   canCreateTask: boolean;
+}
+
+// ───────────── IMAP / SMTP (Phase 4) ─────────────
+
+export interface ImapTestResult {
+  ok: boolean;
+  steps: { step: 'dns' | 'imap' | 'folders' | 'smtp'; ok: boolean; message: string }[];
+  folders: { name: string; type: string }[];
+}
+
+/** Saved server settings of an IMAP mailbox (never the password). */
+export interface ImapSettingsView {
+  username: string;
+  imap: { host: string; port: number; security: 'TLS' | 'STARTTLS' };
+  smtp: { host: string; port: number; security: 'TLS' | 'STARTTLS' };
 }

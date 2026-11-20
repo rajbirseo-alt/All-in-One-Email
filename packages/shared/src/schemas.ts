@@ -511,3 +511,31 @@ export const taskUpdateSchema = z.object({
   dueAt: z.coerce.date().nullable().optional(),
   assigneeId: id.optional(),
 });
+
+// ───────────── IMAP / SMTP mailboxes (Phase 4) ─────────────
+
+const host = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(1)
+  .max(253)
+  .regex(/^[a-z0-9.-]+$/, 'Enter a server name like imap.example.com');
+const serverSchema = z.object({
+  host,
+  port: z.coerce.number().int().min(1).max(65535),
+  security: z.enum(['TLS', 'STARTTLS']),
+});
+export const imapAccountSchema = z.object({
+  email,
+  displayName: z.string().trim().max(120).nullable().optional(),
+  /** Usually the email address. */
+  username: z.string().trim().min(1).max(320),
+  password: z.string().min(1).max(1000),
+  imap: serverSchema,
+  smtp: serverSchema,
+});
+export const imapConnectSchema = imapAccountSchema.extend({
+  departmentId: id.nullable().optional(),
+  syncDays: z.coerce.number().int().min(1).max(3650).optional(),
+});

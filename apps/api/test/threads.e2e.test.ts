@@ -9,7 +9,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { sanitizeEmailHtml } from '../src/threads/email-html';
 import { attachmentBytes, FakeMail } from './fake-mail';
 import { bootApp, type Client, clientAs, makeDepartment, makeUser, prisma } from './helpers';
-import { connectMailbox, daysAgo, gmailMessage, MAIL_ENV, uniqueMailbox } from './mail-helpers';
+import { connectMailbox, daysAgo, gmailMessage, MAIL_ENV, uniqueMailbox, workerServices } from './mail-helpers';
 
 let fake: FakeMail;
 let app: INestApplication;
@@ -39,7 +39,7 @@ beforeAll(async () => {
   fake = await new FakeMail().start();
   ({ app } = await bootApp({ mailEndpoints: fake.endpoints(), env: MAIL_ENV }));
   sync = app.get(SyncService);
-  flags = new FlagPushService(app.get(PrismaService), sync);
+  ({ flags } = await workerServices(app));
   admin = await clientAs(app, (await makeUser({ role: 'SUPER_ADMIN' })).id);
 
   fake.gmailAdd(sales, gmailMessage(sales, 'a1', { subject: 'Website audit quote', text: 'We need an audit for our zebrafish shop', attachment: { filename: 'brief.pdf', mime: 'application/pdf', size: 40 } }));

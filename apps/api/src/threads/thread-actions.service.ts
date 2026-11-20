@@ -51,6 +51,12 @@ export class ThreadActionsService {
     if (!messages.length) return;
     const last = messages.at(-1)!;
     let targets: string[];
+    // IMAP copies are addressed by folder + UID: capture them before the local links change.
+    const account = await this.prisma.emailAccount.findUnique({ where: { id: thread.emailAccountId }, select: { provider: true } });
+    const imapLinks =
+      account?.provider === 'IMAP'
+        ? await this.prisma.messageFolder.findMany({ where: { messageId: { in: messages.map((m) => m.id) }, imapUid: { not: null } }, select: { messageId: true, imapUid: true, folder: { select: { providerFolderId: true, type: true } } } })
+        : [];
 
     switch (action) {
       case 'read':
@@ -87,7 +93,10 @@ export class ThreadActionsService {
     if (STATUS_LEVEL.has(action)) {
       await this.prisma.$transaction((tx) => this.audit.record(tx, ctx, { action: `thread.${action}`, entityType: 'EmailThread', entityId: id }));
     }
-    if (targets.length) await this.queue.enqueueFlags({ threadId: id, action, messageIds: targets });
+    if (targets.length) {
+      const imapRefs = account?.provider === 'IMAP' ? imapLinks.filter((l) => targets.includes(l.messageId)).map((l) => ({ path: l.folder.providerFolderId, type: l.folder.type, uid: Number(l.imapUid) })) : undefined;
+      await this.queue.enqueueFlags({ threadId: id, action, messageIds: targets, ...(imapRefs ? { imapRefs } : {}) });
+    }
   }
 
   private async unlinkFolders(accountId: string, messageIds: string[], types: FolderType[]) {

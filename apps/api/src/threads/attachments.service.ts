@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import { AccessPolicy } from '../access/access-policy.service';
 import { Errors } from '../common/errors';
 import type { RequestContext } from '../common/request-context';
+import { attachmentFromSource } from '@crm/providers';
+import { CredentialService } from '../mail/credential.service';
 import { SyncService } from '../mail/sync.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -28,6 +30,7 @@ export class AttachmentsService {
     private readonly prisma: PrismaService,
     private readonly access: AccessPolicy,
     private readonly sync: SyncService,
+    private readonly credentials: CredentialService,
   ) {}
 
   async download(ctx: RequestContext, id: string, wantInline: boolean): Promise<AttachmentDownload> {
@@ -71,7 +74,23 @@ export class AttachmentsService {
     } else if (message.emailAccount.provider === 'MICROSOFT') {
       data = await this.sync.graph(message.emailAccountId).attachmentContent(message.providerMessageId, att.providerAttachmentId);
     } else {
+      // IMAP: download the message from one of its folders and take the part out of it.
       data = null;
+      const links = await this.prisma.messageFolder.findMany({ where: { messageId: message.id, imapUid: { not: null } }, select: { imapUid: true, folder: { select: { providerFolderId: true } } } });
+      if (links.length) {
+        const imap = await this.credentials.imap(message.emailAccountId);
+        try {
+          for (const l of links) {
+            const source = await imap.source(l.folder.providerFolderId, Number(l.imapUid));
+            if (source) {
+              data = await attachmentFromSource(source, att.providerAttachmentId);
+              break;
+            }
+          }
+        } finally {
+          await imap.close();
+        }
+      }
     }
     if (!data) throw Errors.notFound('Attachment');
     if (!att.sha256) {

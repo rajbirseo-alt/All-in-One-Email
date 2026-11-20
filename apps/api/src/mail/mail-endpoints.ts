@@ -7,6 +7,7 @@ import {
   type FetchFn,
   type MailOAuthClient,
   type MailProviderId,
+  type ImapTransportPolicy,
 } from '@crm/providers';
 import type { AppConfig } from '../config/config';
 
@@ -19,6 +20,8 @@ export interface MailEndpoints {
   graphApiBase: string;
   oauth: Partial<Record<MailProviderId, MailOAuthClient>>;
   fetch: FetchFn;
+  /** IMAP/SMTP transport policy: strict in production; tests relax it in code. */
+  imap: ImapTransportPolicy;
   /** Verifies Pub/Sub push OIDC tokens (Google's keys). */
   googleJwks: JWTVerifyGetKey;
 }
@@ -38,6 +41,7 @@ export function buildMailEndpoints(cfg: AppConfig): MailEndpoints {
     graphApiBase: GRAPH_API_BASE,
     oauth,
     fetch: (...args) => fetch(...args),
+    imap: {},
     googleJwks: createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs')),
   };
 }

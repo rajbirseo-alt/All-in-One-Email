@@ -1,10 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@crm/db';
 import { newId } from '@crm/crypto';
-import { AuthError, ProviderRequestError, RateLimitedError, TransientError } from '@crm/providers';
+import { AuthError, ProviderRequestError, RateLimitedError, TransientError, imapMessageKey, smtpSend } from '@crm/providers';
 import type { Participant } from '@crm/shared';
+import { CredentialService } from '../mail/credential.service';
 import { IngestService } from '../mail/ingest.service';
+import { MAIL_ENDPOINTS, type MailEndpoints } from '../mail/mail-endpoints';
 import type { SendJob } from '../mail/queue.service';
 import { SyncService } from '../mail/sync.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -34,6 +36,8 @@ export class SendService {
     private readonly sync: SyncService,
     private readonly ingest: IngestService,
     private readonly attachments: AttachmentsService,
+    private readonly credentials: CredentialService,
+    @Inject(MAIL_ENDPOINTS) private readonly endpoints: MailEndpoints,
   ) {}
 
   async send(job: SendJob): Promise<'sent' | 'skipped' | 'failed'> {
@@ -48,7 +52,8 @@ export class SendService {
       include: { emailAccount: true, attachments: true, thread: true },
     });
     try {
-      const sent = draft.emailAccount.provider === 'GMAIL' ? await this.viaGmail(draft) : await this.viaGraph(draft);
+      const provider = draft.emailAccount.provider;
+      const sent = provider === 'GMAIL' ? await this.viaGmail(draft) : provider === 'MICROSOFT' ? await this.viaGraph(draft) : await this.viaImap(draft);
       await this.record(draft, sent);
       return 'sent';
     } catch (e) {
@@ -138,6 +143,62 @@ export class SendService {
     await graph.sendDraft(draftId);
     const meta = await graph.messageMeta(draftId);
     return { providerMessageId: draftId, providerThreadId: meta?.conversationId ?? null, internetMessageId: meta?.internetMessageId ?? '' };
+  }
+
+  /** Marker in `providerDraftId`: the SMTP server accepted this Message-ID, so a retry must not send again. */
+  private static readonly SMTP_ACCEPTED = 'smtp-accepted:';
+
+  /**
+   * SMTP, then a copy in the Sent folder (IMAP APPEND) unless the server filed one itself.
+   * Retries never send twice: once SMTP accepts, the draft is marked; a retry only finishes the
+   * Sent copy. Bcc recipients get the mail through the SMTP envelope; the Bcc header is only in
+   * the Sent copy.
+   */
+  private async viaImap(draft: Prisma.DraftGetPayload<{ include: { emailAccount: true; attachments: true; thread: true } }>): Promise<Sent> {
+    const cfg = await this.credentials.imapConfig(draft.emailAccountId);
+    const imap = await this.credentials.imap(draft.emailAccountId);
+    const domain = draft.emailAccount.emailAddress.split('@')[1] ?? 'mail.local';
+    let messageId = draft.messageIdHeader;
+    if (!messageId) {
+      messageId = `<${randomUUID()}@${domain}>`;
+      await this.prisma.draft.update({ where: { id: draft.id }, data: { messageIdHeader: messageId } });
+    }
+    const parent = await this.parentOf(draft);
+    const to = people(draft.toRecipients);
+    const cc = people(draft.ccRecipients);
+    const bcc = people(draft.bccRecipients);
+    const mail = {
+      from: { address: draft.emailAccount.emailAddress, name: draft.emailAccount.displayName },
+      to,
+      cc,
+      subject: draft.subject,
+      html: draft.bodyHtml,
+      messageId,
+      inReplyTo: draft.mode === 'FORWARD' ? null : (parent?.internetMessageId ?? null),
+      references: draft.mode === 'FORWARD' || !parent ? [] : [...parent.references, ...(parent.internetMessageId ? [parent.internetMessageId] : [])].slice(-20),
+      attachments: await this.files(draft, true),
+    };
+    const sentFolder = await this.prisma.emailFolder.findFirst({ where: { emailAccountId: draft.emailAccountId, type: 'SENT' } });
+    try {
+      if (draft.providerDraftId !== SendService.SMTP_ACCEPTED + messageId) {
+        const recipients = [...to, ...cc, ...bcc].map((r) => r.address);
+        await smtpSend(cfg, await buildMime({ ...mail, bcc: [] }), { from: draft.emailAccount.emailAddress, to: recipients }, this.endpoints.imap);
+        await this.prisma.draft.update({ where: { id: draft.id }, data: { providerDraftId: SendService.SMTP_ACCEPTED + messageId } });
+      }
+      if (sentFolder) {
+        try {
+          // Some servers (Gmail, Microsoft, some Zoho plans) file the copy themselves.
+          const already = await imap.findByMessageId(sentFolder.providerFolderId, messageId);
+          if (!already.length) await imap.append(sentFolder.providerFolderId, await buildMime({ ...mail, bcc }), ['\\Seen']);
+        } catch (e) {
+          // The mail is sent; only the provider-side copy is missing. The CRM keeps its own copy.
+          this.log.warn(`Sent copy of draft ${draft.id} could not be saved in ${sentFolder.providerFolderId}: ${(e as Error).message}`);
+        }
+      }
+    } finally {
+      await imap.close();
+    }
+    return { providerMessageId: imapMessageKey(messageId, sentFolder?.providerFolderId ?? 'Sent', 0, 0), providerThreadId: null, internetMessageId: messageId };
   }
 
   /** Stores the sent message in its conversation right away; the next sync dedupes the provider's copy. */

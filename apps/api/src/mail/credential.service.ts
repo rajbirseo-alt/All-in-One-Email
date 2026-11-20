@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Envelope, newId } from '@crm/crypto';
-import { AuthError, ProviderHttp, refreshAccessToken, type AccessTokenSource, type MailProviderId, type TokenSet } from '@crm/providers';
+import { AuthError, ImapClient, ProviderHttp, refreshAccessToken, type AccessTokenSource, type ImapAccountConfig, type MailProviderId, type TokenSet } from '@crm/providers';
 import { ENVELOPE } from '../crypto.provider';
 import { PrismaService, type Tx } from '../prisma/prisma.service';
 import { MAIL_ENDPOINTS, type MailEndpoints } from './mail-endpoints';
@@ -49,6 +49,62 @@ export class CredentialService {
       create: { id: newId(), emailAccountId: accountId, ...data },
       update: { ...data, rotatedAt: new Date() },
     });
+  }
+
+  /**
+   * IMAP/SMTP: the password is encrypted like OAuth tokens; host, port and security are not
+   * secret and sit in plain columns so the settings form can show them.
+   */
+  async storePassword(tx: Tx, accountId: string, cfg: Omit<ImapAccountConfig, 'email'>) {
+    const blob = await this.envelope.encrypt(JSON.stringify({ password: cfg.password }), this.context(accountId));
+    const data = {
+      kind: 'PASSWORD' as const,
+      ciphertext: new Uint8Array(blob.ciphertext),
+      iv: new Uint8Array(blob.iv),
+      authTag: new Uint8Array(blob.authTag),
+      wrappedDataKey: new Uint8Array(blob.wrappedDataKey),
+      keyId: blob.keyId,
+      keyVersion: blob.keyVersion,
+      scopes: [],
+      accessTokenExpiresAt: null,
+      username: cfg.username,
+      imapHost: cfg.imap.host,
+      imapPort: cfg.imap.port,
+      imapSecurity: cfg.imap.security,
+      smtpHost: cfg.smtp.host,
+      smtpPort: cfg.smtp.port,
+      smtpSecurity: cfg.smtp.security,
+    };
+    await tx.emailCredential.upsert({
+      where: { emailAccountId: accountId },
+      create: { id: newId(), emailAccountId: accountId, ...data },
+      update: { ...data, rotatedAt: new Date() },
+    });
+  }
+
+  /** Decrypted IMAP/SMTP settings; AuthError when there is no password (disconnected). */
+  async imapConfig(accountId: string): Promise<ImapAccountConfig> {
+    const c = await this.prisma.emailCredential.findUnique({ where: { emailAccountId: accountId }, include: { emailAccount: { select: { emailAddress: true } } } });
+    if (!c || c.kind !== 'PASSWORD' || !c.imapHost || !c.smtpHost) throw new AuthError('No stored password (mailbox disconnected)');
+    const { password } = JSON.parse((await this.decrypt(c, accountId)).toString('utf8')) as { password: string };
+    return {
+      email: c.emailAccount.emailAddress,
+      username: c.username ?? c.emailAccount.emailAddress,
+      password,
+      imap: { host: c.imapHost, port: c.imapPort ?? 993, security: c.imapSecurity ?? 'TLS' },
+      smtp: { host: c.smtpHost, port: c.smtpPort ?? 465, security: c.smtpSecurity ?? 'TLS' },
+    };
+  }
+
+  async imap(accountId: string) {
+    return new ImapClient(await this.imapConfig(accountId), this.endpoints.imap);
+  }
+
+  private decrypt(c: { ciphertext: Uint8Array; iv: Uint8Array; authTag: Uint8Array; wrappedDataKey: Uint8Array; keyId: string; keyVersion: number }, accountId: string) {
+    return this.envelope.decrypt(
+      { ciphertext: Buffer.from(c.ciphertext), iv: Buffer.from(c.iv), authTag: Buffer.from(c.authTag), wrappedDataKey: Buffer.from(c.wrappedDataKey), keyId: c.keyId, keyVersion: c.keyVersion },
+      this.context(accountId),
+    );
   }
 
   private async load(accountId: string): Promise<StoredTokens> {

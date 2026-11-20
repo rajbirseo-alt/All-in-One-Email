@@ -49,8 +49,10 @@ export interface NormalizedMessage {
   isStarred: boolean;
   receivedAt: Date;
   sentAt: Date | null;
-  /** Gmail label ids / the Graph parent folder id. */
+  /** Gmail label ids / the Graph parent folder id / the IMAP folder path. */
   providerFolderIds: string[];
+  /** IMAP: the message's UID in that folder. */
+  imapUid?: number | null;
   /** Provider's own flag. Graph lists attachment metadata separately, so `attachments` can be empty while this is true. */
   hasAttachments: boolean;
   attachments: NormalizedAttachment[];

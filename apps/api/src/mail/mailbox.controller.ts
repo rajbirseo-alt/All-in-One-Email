@@ -3,10 +3,14 @@ import type { Request, Response } from 'express';
 import type { z } from 'zod';
 import {
   connectMailboxSchema,
+  imapAccountSchema,
+  imapConnectSchema,
   mailboxAccessSchema,
   mailboxFoldersSchema,
   mailboxSyncQuery,
   updateMailboxSchema,
+  type ImapSettingsView,
+  type ImapTestResult,
   type MailboxDetail,
   type MailboxProvidersResponse,
   type MailboxSummary,
@@ -79,6 +83,27 @@ export class MailboxController {
       if (e instanceof ConnectError) return res.redirect(302, `${page}?error=${encodeURIComponent(e.code)}`);
       throw e;
     }
+  }
+
+  /** IMAP/SMTP: checks the settings without saving anything. */
+  @RequirePermission('account.connect')
+  @Post('imap/test')
+  @HttpCode(200)
+  testImap(@Body(new ZodPipe(imapAccountSchema)) body: z.infer<typeof imapAccountSchema>): Promise<ImapTestResult> {
+    return this.connect.testImap(body);
+  }
+
+  /** IMAP/SMTP: connects (or reconnects) after a passing test; the password is stored encrypted. */
+  @RequirePermission('account.connect')
+  @Post('imap')
+  async connectImap(@Ctx() ctx: RequestContext, @Body(new ZodPipe(imapConnectSchema)) body: z.infer<typeof imapConnectSchema>) {
+    return { id: await this.connect.connectImap(ctx, body) };
+  }
+
+  @RequirePermission('account.manage')
+  @Get(':id/imap')
+  imapSettings(@Param('id') id: string): Promise<ImapSettingsView> {
+    return this.connect.imapSettings(id);
   }
 
   @RequirePermission('account.manage')

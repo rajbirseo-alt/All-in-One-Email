@@ -42,6 +42,7 @@ export class MailboxService {
     return {
       gmail: !!this.endpoints.oauth.GMAIL,
       microsoft: !!this.endpoints.oauth.MICROSOFT,
+      imap: true,
       gmailPush: this.cfg.gmailPushEnabled,
       microsoftPush: this.cfg.graphPushEnabled,
       initialSyncDays: this.cfg.MAIL_INITIAL_SYNC_DAYS,
@@ -205,7 +206,7 @@ export class MailboxService {
       if (full) {
         // A full resync re-reads the window; stored messages are deduplicated.
         await tx.emailAccount.update({ where: { id }, data: { status: 'INITIAL_SYNC', gmailHistoryId: null } });
-        await tx.emailFolder.updateMany({ where: { emailAccountId: id }, data: { deltaLink: null } });
+        await tx.emailFolder.updateMany({ where: { emailAccountId: id }, data: { deltaLink: null, lastUid: null } });
       }
       await this.audit.record(tx, ctx, { action: full ? 'account.resync' : 'account.sync', entityType: 'EmailAccount', entityId: id });
     });

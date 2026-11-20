@@ -23,6 +23,11 @@ export interface IngestTarget {
   accountEmail: string;
   /** providerFolderId → stored folder. Messages are linked only to known folders. */
   folders: Map<string, FolderRef>;
+  /**
+   * IMAP syncs one folder at a time: an existing message only has its links in these stored
+   * folders replaced (its copies in other folders are left alone). Unset = all folders (Gmail, Graph).
+   */
+  folderScope?: Set<string>;
 }
 
 export interface IngestResult {
@@ -70,8 +75,8 @@ export class IngestService {
       if (existing) {
         await this.prisma.$transaction([
           this.prisma.emailMessage.update({ where: { id: existing.id }, data: { isRead: m.isRead, isStarred: m.isStarred } }),
-          this.prisma.messageFolder.deleteMany({ where: { messageId: existing.id } }),
-          this.prisma.messageFolder.createMany({ data: folderLinks.map((f) => ({ messageId: existing.id, folderId: f.id })), skipDuplicates: true }),
+          this.prisma.messageFolder.deleteMany({ where: { messageId: existing.id, ...(target.folderScope ? { folderId: { in: [...target.folderScope] } } : {}) } }),
+          this.prisma.messageFolder.createMany({ data: folderLinks.map((f) => ({ messageId: existing.id, folderId: f.id, imapUid: m.imapUid ?? null })), skipDuplicates: true }),
         ]);
         result.updated++;
         result.threadIds.add(existing.threadId);
@@ -123,7 +128,7 @@ export class IngestService {
               isInline: a.isInline,
             })),
           }),
-          this.prisma.messageFolder.createMany({ data: folderLinks.map((f) => ({ messageId: id, folderId: f.id })), skipDuplicates: true }),
+          this.prisma.messageFolder.createMany({ data: folderLinks.map((f) => ({ messageId: id, folderId: f.id, imapUid: m.imapUid ?? null })), skipDuplicates: true }),
         ]);
         result.added++;
       } catch (e) {
@@ -161,6 +166,22 @@ export class IngestService {
         select: { threadId: true },
       });
       if (parent) return parent.threadId;
+    }
+    // No thread id from the provider (IMAP) and no matching headers: same subject with the same people within 30 days.
+    if (!m.providerThreadId && base.normalizedSubject.length >= 4 && m.from) {
+      const people = [m.from.address, ...m.to.map((a) => a.address)].map((a) => a.toLowerCase());
+      const same = await this.prisma.emailThread.findFirst({
+        where: {
+          emailAccountId: accountId,
+          providerThreadId: null,
+          normalizedSubject: base.normalizedSubject,
+          lastMessageAt: { gte: new Date(m.receivedAt.getTime() - 30 * 86_400_000) },
+          messages: { some: { fromAddress: { in: people } } },
+        },
+        orderBy: { lastMessageAt: 'desc' },
+        select: { id: true },
+      });
+      if (same) return same.id;
     }
     const t = await this.prisma.emailThread.create({ data: { id: newId(), emailAccountId: accountId, ...base }, select: { id: true } });
     return t.id;

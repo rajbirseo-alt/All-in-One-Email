@@ -48,6 +48,9 @@ Base path is `/api/v1`. The API uses JSON and is authenticated by an httpOnly se
 | GET | `/accounts` | Signed in. Mailbox managers see all; others see mailboxes granted to them, their team or their department. Includes health: status, last success, last error, message/thread counts, newest message, push on/off |
 | GET | `/accounts/providers` | `account.connect` or `account.manage`. Which providers are configured, push availability, import window, retention days |
 | POST | `/accounts/oauth/:provider/start` | `account.connect`. `google` or `microsoft`. Body `{departmentId?, syncDays?}`. Returns `{url}` and sets a signed state cookie (PKCE verifier, state, starting user) |
+| POST | `/accounts/imap/test` | `account.connect`. `{email, username, password, imap{host,port,security}, smtp{…}}` → `{ok, steps[dns,imap,folders,smtp], folders}`. Saves nothing. Private/loopback hosts and non-TLS connections are refused |
+| POST | `/accounts/imap` | `account.connect`. Same body plus `departmentId?, syncDays?`. Runs the test first (422 with the failed steps); creates the mailbox, or reconnects an existing IMAP one with new settings. 409 if the address is connected through Google/Microsoft. The password is stored envelope-encrypted |
+| GET | `/accounts/:id/imap` | `account.manage`. Saved server settings (never the password), for the reconnect form |
 | GET | `/accounts/oauth/:provider/callback` | `account.connect`, same user who started. Stores the encrypted tokens, creates or reconnects the mailbox, queues the first sync. Redirects to `/admin/mailboxes?connected=<id>` or `?error=<code>` |
 | GET | `/accounts/:id` | `account.manage`. Detail: folders with counts, push subscriptions, access grants, last 20 sync runs |
 | PATCH | `/accounts/:id` | `account.manage`. `{displayName?, departmentId?}` |

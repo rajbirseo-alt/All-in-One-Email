@@ -51,3 +51,18 @@ export function phoneKey(phone: string | null | undefined): string | null {
   const d = (phone ?? '').replace(/\D/g, '');
   return d.length >= 7 ? d.slice(-10) : null;
 }
+
+/**
+ * Server settings for common hosts. `{domain}` is replaced by the mailbox's domain.
+ * `appPassword`: the provider requires an app password when two-step login is on.
+ */
+export const IMAP_PRESETS = [
+  { id: 'zoho', label: 'Zoho Mail', imap: { host: 'imap.zoho.com', port: 993, security: 'TLS' }, smtp: { host: 'smtp.zoho.com', port: 465, security: 'TLS' }, appPassword: true, note: 'Accounts in the India data centre use imap.zoho.in and smtp.zoho.in. Turn on IMAP access in Zoho Mail settings first.' },
+  { id: 'zoho-in', label: 'Zoho Mail (India)', imap: { host: 'imap.zoho.in', port: 993, security: 'TLS' }, smtp: { host: 'smtp.zoho.in', port: 465, security: 'TLS' }, appPassword: true, note: 'Turn on IMAP access in Zoho Mail settings first.' },
+  { id: 'hostinger', label: 'Hostinger', imap: { host: 'imap.hostinger.com', port: 993, security: 'TLS' }, smtp: { host: 'smtp.hostinger.com', port: 465, security: 'TLS' }, appPassword: false, note: null },
+  { id: 'godaddy', label: 'GoDaddy (Workspace Email)', imap: { host: 'imap.secureserver.net', port: 993, security: 'TLS' }, smtp: { host: 'smtpout.secureserver.net', port: 465, security: 'TLS' }, appPassword: false, note: null },
+  { id: 'cpanel', label: 'cPanel / own hosting', imap: { host: 'mail.{domain}', port: 993, security: 'TLS' }, smtp: { host: 'mail.{domain}', port: 465, security: 'TLS' }, appPassword: false, note: 'Your host may use a different server name; it is shown under "Connect Devices" in cPanel.' },
+  { id: 'yahoo', label: 'Yahoo Mail', imap: { host: 'imap.mail.yahoo.com', port: 993, security: 'TLS' }, smtp: { host: 'smtp.mail.yahoo.com', port: 465, security: 'TLS' }, appPassword: true, note: 'Create an app password in Yahoo account security.' },
+  { id: 'icloud', label: 'iCloud Mail', imap: { host: 'imap.mail.me.com', port: 993, security: 'TLS' }, smtp: { host: 'smtp.mail.me.com', port: 587, security: 'STARTTLS' }, appPassword: true, note: 'Create an app-specific password at appleid.apple.com. The username is the part before @icloud.com.' },
+  { id: 'other', label: 'Other', imap: { host: '', port: 993, security: 'TLS' }, smtp: { host: '', port: 465, security: 'TLS' }, appPassword: false, note: null },
+] as const;

@@ -137,6 +137,8 @@ export class FakeMail {
       graphApiBase: `${this.base}/graph/v1.0`,
       oauth: { GMAIL: google, MICROSOFT: microsoft },
       fetch: (...args) => fetch(...args),
+      // Local fake IMAP/SMTP servers: plain TCP on 127.0.0.1.
+      imap: { plaintextForTests: true, allowPrivateHosts: true, timeoutMs: 5000 },
       googleJwks: createLocalJWKSet({ keys: [this.jwk] }),
     };
   }

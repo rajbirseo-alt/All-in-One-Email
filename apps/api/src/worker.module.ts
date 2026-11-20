@@ -5,6 +5,7 @@ import { APP_CONFIG, type AppConfig } from './config/config';
 import { envelopeProvider } from './crypto.provider';
 import type { MailEndpoints } from './mail/mail-endpoints';
 import { MailWorkerService } from './mail/mail-worker.service';
+import { ImapIdleService } from './mail/imap-idle.service';
 import { FlagPushService } from './mail/flag-push.service';
 import { AttachmentsService } from './threads/attachments.service';
 import { SendService } from './compose/send.service';
@@ -29,6 +30,7 @@ export class WorkerModule {
         AttachmentsService,
         SendService,
         PushService,
+        ImapIdleService,
         MailWorkerService,
       ],
     };
