@@ -227,7 +227,7 @@ export class IngestService {
    * (`awaitingReplySince` = first inbound message after the last outbound one). Threads left
    * without messages are deleted.
    */
-  async refreshThreads(threadIds: Iterable<string>) {
+  async refreshThreads(threadIds: Iterable<string>): Promise<MailChange[]> {
     const ids = [...threadIds];
     const changes: MailChange[] = [];
     const slaDirty: string[] = [];
@@ -305,5 +305,6 @@ export class IngestService {
     if (changes.length) await this.leads.afterMail(changes).catch((e: Error) => this.log.error(`Lead update failed: ${e.message}`));
     // Live updates: open inboxes refetch these threads (ids only; recipients are filtered per user).
     if (ids.length) await this.events.threadsChanged(ids).catch(() => undefined);
+    return changes;
   }
 }

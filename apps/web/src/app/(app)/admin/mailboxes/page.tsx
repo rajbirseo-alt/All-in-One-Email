@@ -362,6 +362,23 @@ function DetailModal({ id, providers, onClose }: { id: string; providers: Mailbo
               <Button className="mt-2" size="sm" onClick={() => void act.run('', 'PATCH', { displayName: displayName || null, departmentId: departmentId || null })}>
                 Save settings
               </Button>
+              <label className="mt-3 flex items-start gap-2 text-[14px]">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={d.aiEnabled}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    if (!on || confirm(`Allow the AI assistant for ${d.emailAddress}? Its email content will be sent to the AI provider (OpenAI) for summaries, classification and reply suggestions.`)) {
+                      void act.run('', 'PATCH', { aiEnabled: on });
+                    }
+                  }}
+                />
+                <span>
+                  Allow the AI assistant for this mailbox
+                  <span className="block text-[12.5px] text-text-3">When off, no email from this mailbox is ever sent to the AI provider (e.g. for HR or finance mail).</span>
+                </span>
+              </label>
             </section>
           )}
 

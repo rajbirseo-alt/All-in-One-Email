@@ -130,4 +130,4 @@ Observability: structured JSON logs (pino), OpenTelemetry traces, Sentry for err
 | Validation | Zod (shared) + Nest pipes | One schema used by both web forms and API |
 | HTML safety | `sanitize-html` on the server + sandboxed iframe render | Email HTML is hostile input |
 | Editor | TipTap | Rich text, mentions (for notes), extensible |
-| AI | OpenAI Responses API, model set in config | Structured outputs for classification |
+| AI | OpenAI Chat Completions with JSON-schema structured outputs (OpenAI-compatible base URL), model set in config (`OPENAI_MODEL`, default gpt-4o-mini) | Structured outputs for classification |

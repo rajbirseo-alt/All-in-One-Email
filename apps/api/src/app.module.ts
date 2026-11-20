@@ -62,6 +62,12 @@ import { TasksService } from './crm/tasks.service';
 import { LeadsService } from './crm/leads.service';
 import { ContactsService } from './crm/contacts.service';
 import { CrmController } from './crm/crm.controller';
+import { OpenAiClient } from './ai/openai.client';
+import { InsightsService } from './ai/insights.service';
+import { SuggestionsService } from './ai/suggestions.service';
+import { AutomationEngine } from './automation/automation-engine';
+import { AutomationService } from './automation/automation.service';
+import { AiAutomationController } from './automation/ai-automation.controller';
 
 /** Providers shared by the HTTP API and the worker process. */
 export function mailProviders(cfg: AppConfig, mailEndpoints?: MailEndpoints) {
@@ -69,6 +75,7 @@ export function mailProviders(cfg: AppConfig, mailEndpoints?: MailEndpoints) {
     { provide: MAIL_ENDPOINTS, useFactory: () => mailEndpoints ?? buildMailEndpoints(cfg) },
     EventsPublisher,
     AccessPolicyForMail,
+    PermissionService,
     NotificationsService,
     CrmAccess,
     ContactLinkService,
@@ -78,6 +85,11 @@ export function mailProviders(cfg: AppConfig, mailEndpoints?: MailEndpoints) {
     StatusService,
     AssignmentService,
     RoutingService,
+    OpenAiClient,
+    InsightsService,
+    DraftsService,
+    SuggestionsService,
+    AutomationEngine,
     CredentialService,
     IngestService,
     SyncService,
@@ -100,14 +112,13 @@ export class AppModule {
     return {
       module: AppModule,
       imports: [ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 300 }])],
-      controllers: [AuthController, UsersController, RolesController, OrgController, AuditController, HealthController, MailboxController, WebhooksController, AssignmentController, StatusController, CrmController, ThreadsController, ComposeController, EventsController, SlaController, NotificationsController],
+      controllers: [AuthController, UsersController, RolesController, OrgController, AuditController, HealthController, MailboxController, WebhooksController, AssignmentController, StatusController, CrmController, AiAutomationController, ThreadsController, ComposeController, EventsController, SlaController, NotificationsController],
       providers: [
         { provide: APP_CONFIG, useValue: cfg },
         { provide: SSO_PROVIDERS, useFactory: () => opts.ssoProviders ?? buildSsoProviders(cfg) },
         envelopeProvider,
         PrismaService,
         AuditService,
-        PermissionService,
         AccessPolicy,
         SessionService,
         PasswordService,
@@ -123,7 +134,6 @@ export class AppModule {
         ThreadsService,
         AttachmentsService,
         ThreadActionsService,
-        DraftsService,
         EventsHub,
         RulesService,
         CollabService,
@@ -131,6 +141,7 @@ export class AppModule {
         TemplatesService,
         SlaAdminService,
         ContactsService,
+        AutomationService,
         // Order matters: rate-limit first, then authentication/authorisation.
         { provide: APP_GUARD, useClass: ThrottlerGuard },
         { provide: APP_GUARD, useClass: AuthGuard },

@@ -57,6 +57,15 @@ const schema = z
     VAPID_PRIVATE_KEY: z.string().optional(),
     /** Contact the push services can reach, e.g. mailto:it@seodiscovery.com. Defaults to APP_URL. */
     VAPID_SUBJECT: z.string().optional(),
+    /** AI (Phase 8). Off until a key is set. Email content of mailboxes with AI allowed is sent to this provider. */
+    OPENAI_API_KEY: z.string().optional(),
+    /** OpenAI-compatible endpoint (OpenAI, Azure OpenAI proxy, or the test fake). */
+    OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
+    OPENAI_MODEL: z.string().min(1).default('gpt-4o-mini'),
+    /** Analyse new incoming mail automatically (summary, category, urgency, lead detection). */
+    AI_AUTO_ANALYZE: bool.default('true'),
+    /** One line about the company for reply suggestions. */
+    AI_COMPANY_CONTEXT: z.string().max(1000).default('SEO Discovery is a digital marketing agency (SEO, PPC, social media, web design and development).'),
   })
   .superRefine((c, ctx) => {
     if (c.NODE_ENV === 'production' && !c.APP_URL.startsWith('https://')) {
@@ -92,6 +101,8 @@ export type AppConfig = z.infer<typeof schema> & {
   gmailPushEnabled: boolean;
   /** Browser push is on when VAPID keys are configured. */
   webPushEnabled: boolean;
+  /** AI features are on when an API key is configured. */
+  aiEnabled: boolean;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -112,6 +123,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     graphPushEnabled: !!c.MICROSOFT_CLIENT_ID && c.APP_URL.startsWith('https://'),
     gmailPushEnabled: !!c.GOOGLE_CLIENT_ID && !!c.GMAIL_PUBSUB_TOPIC,
     webPushEnabled: !!c.VAPID_PUBLIC_KEY && !!c.VAPID_PRIVATE_KEY,
+    aiEnabled: !!c.OPENAI_API_KEY,
   };
 }
 

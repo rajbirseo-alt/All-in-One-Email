@@ -20,6 +20,9 @@ import { IngestService, type FolderRef, type IngestResult, type IngestTarget } f
 import { MAIL_ENDPOINTS, type MailEndpoints } from './mail-endpoints';
 import { RoutingService } from '../assignment/routing.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { APP_CONFIG, type AppConfig } from '../config/config';
+import { QueueService } from './queue.service';
+import type { MailChange } from '../status/status.service';
 
 /** Consecutive failed runs before the account is shown as ERROR. */
 export const ERROR_THRESHOLD = 5;
@@ -63,6 +66,8 @@ export class SyncService {
     @Inject(MAIL_ENDPOINTS) private readonly endpoints: MailEndpoints,
     private readonly routing: RoutingService,
     private readonly notifications: NotificationsService,
+    private readonly queue: QueueService,
+    @Inject(APP_CONFIG) private readonly cfg: AppConfig,
   ) {}
 
   gmail(accountId: string) {
@@ -88,9 +93,10 @@ export class SyncService {
       if (account.provider === 'GMAIL') await this.syncGmail(account, initial, kind, result);
       else if (account.provider === 'MICROSOFT') await this.syncGraph(account, initial, result);
       else await this.syncImap(account, result);
-      await this.ingest.refreshThreads(result.threadIds);
+      const changes = await this.ingest.refreshThreads(result.threadIds);
       // New conversations go through the assignment rules (history imported at connect does not).
       await this.routing.routeNew(result.threadIds).catch((e: Error) => this.log.error(`Routing failed: ${e.message}`));
+      await this.afterNewMail(account, changes).catch((e: Error) => this.log.error(`Queueing AI / automation failed: ${e.message}`));
 
       await this.prisma.$transaction([
         this.prisma.syncLog.update({
@@ -146,6 +152,22 @@ export class SyncService {
         return 'needs_reauth';
       }
       throw e;
+    }
+  }
+
+  /**
+   * New incoming mail (not imported history): AI analysis first when it is on for the mailbox,
+   * which then runs the automation rules; otherwise the automation rules directly.
+   */
+  private async afterNewMail(account: EmailAccount, changes: MailChange[]) {
+    const fresh = changes.filter((c) => c.live && c.newInbound);
+    if (!fresh.length) return;
+    const threads = await this.prisma.emailThread.findMany({ where: { id: { in: fresh.map((c) => c.threadId) }, isSpam: false, isTrashed: false }, select: { id: true } });
+    const analyse = this.cfg.aiEnabled && this.cfg.AI_AUTO_ANALYZE && account.aiEnabled;
+    for (const t of threads) {
+      const latest = await this.prisma.emailMessage.findFirst({ where: { threadId: t.id, direction: 'INBOUND' }, orderBy: { receivedAt: 'desc' }, select: { id: true } });
+      if (analyse) await this.queue.enqueueAi({ threadId: t.id, messageId: latest?.id ?? null });
+      else await this.queue.enqueueAutomation({ trigger: 'MESSAGE_RECEIVED', eventKey: `msg:${latest?.id ?? t.id}`, threadId: t.id });
     }
   }
 

@@ -94,10 +94,13 @@ export class FakeImapBox {
   /** Make the SMTP server refuse the next N sends with a temporary error. */
   failNextSends = 0;
 
-  constructor(
-    readonly user: string,
-    public password = 'right-password',
-  ) {}
+  readonly user: string;
+  password: string;
+
+  constructor(user: string, password = 'right-password') {
+    this.user = user;
+    this.password = password;
+  }
 
   async start(folders: Record<string, string> = { Sent: '\\Sent', Archive: '\\Archive', Junk: '\\Junk', Trash: '\\Trash', Drafts: '\\Drafts' }) {
     this.imap = hoodiecrow({

@@ -233,6 +233,7 @@ model Department {
   assignments     Assignment[]
   contacts        Contact[]
   leads           Lead[]
+  automationRules AutomationRule[]
   slaPolicies     SlaPolicy[]
   templates       Template[]
   assignmentRules AssignmentRule[]
@@ -302,6 +303,7 @@ model EmailAccount {
   status              AccountStatus @default(CONNECTING)
   connectedById       String
   syncFromDate        DateTime? // initial sync window start
+  aiEnabled           Boolean       @default(true) // false: no content of this mailbox is ever sent to the AI provider
   // Provider sync cursors
   gmailHistoryId      String?
   // Health
@@ -1205,6 +1207,7 @@ enum NotificationType {
   ACCOUNT_NEEDS_REAUTH
   TASK_DUE
   TASK_ASSIGNED
+  AUTOMATION // a message from an automation rule, e.g. "AI draft ready"
 }
 
 model Notification {
@@ -1358,20 +1361,22 @@ enum AutomationTrigger {
 ///                     |"create_lead"|"request_ai_draft", params: {...} }]
 /// No action type exists that sends an external email.
 model AutomationRule {
-  id          String            @id
-  name        String
-  description String?
-  trigger     AutomationTrigger
-  schedule    String?
-  conditions  Json
-  actions     Json
-  isEnabled   Boolean           @default(false)
-  position    Int               @default(0)
-  createdById String
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  id           String            @id
+  name         String
+  description  String?
+  trigger      AutomationTrigger
+  schedule     String?
+  conditions   Json
+  actions      Json
+  isEnabled    Boolean           @default(false)
+  position     Int               @default(0)
+  departmentId String? // set: applies only to that department's conversations (and is managed by its managers)
+  createdById  String
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
 
-  runs AutomationRun[]
+  runs       AutomationRun[]
+  department Department?     @relation(fields: [departmentId], references: [id])
 
   @@index([trigger, isEnabled, position])
   @@map("automation_rules")

@@ -157,16 +157,28 @@ Webhook handlers only dedupe the event and enqueue a sync. They return 202 withi
 - **Lead stage.** Our first reply on the lead's conversation moves it from New to Contacted.
 - **Task reminders.** The worker's minute sweep sends one `TASK_DUE` notification per due time.
 
-## AI & automation — Phase 8
+## AI & automation — Phase 8 (as built)
+AI calls need `ai.use` covering the conversation (the same scopes as conversations; 404 outside it). They return 503 `AI_DISABLED` / `AI_UNAVAILABLE` when the server has no key or the provider fails, 403 `AI_NOT_ALLOWED` when the mailbox has AI switched off, and 429 when the provider is busy. AI endpoints are limited to 20 calls per user per minute.
+
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/threads/:id/insights` | Cached summary, category, sentiment, urgency, lead score, follow-up |
-| POST | `/threads/:id/insights/refresh` | Rate-limited per user |
-| POST | `/ai/suggest-reply` | `{threadId, tone?, instructions?}` → `AiSuggestion` (PROPOSED) |
-| POST | `/ai/rewrite` | `{text, kind: grammar\|tone, tone?}` → text |
-| POST | `/ai/suggestions/:id/use` | Creates a **Draft** (`source=AI`). There is no endpoint that sends an AI suggestion directly |
-| CRUD | `/automation-rules` · POST `/automation-rules/:id/enable` · `/disable` · `/test` | 🔒 `automation.manage` |
-| GET | `/automation-rules/:id/runs` | |
+| GET | `/ai/status` | `{enabled, model, autoAnalyze}` |
+| GET | `/threads/:id/insights` | Cached `{available, reason, stale, summary, category, sentiment, urgency{level,reason}, lead{isLead,confidence,serviceInterest,companyName,reason}, followUp{needed,inDays,action}}`. Reading never calls the AI |
+| POST | `/threads/:id/insights/refresh` | Analyses now (up to the latest message) |
+| POST | `/ai/suggest-reply` | `{threadId, tone: professional\|friendly\|concise\|formal\|apologetic, instructions?}` → `AiSuggestion` (PROPOSED) |
+| GET | `/threads/:id/ai-suggestions` | The caller's open suggestions |
+| POST | `/ai/suggestions/:id/use` · `/discard` | `use` creates a reply **Draft** owned by the caller (`source=AI`, status EDITING), with normal draft permissions. 409 if already used. There is no endpoint that sends an AI suggestion |
+| POST | `/ai/rewrite` | `{draftId, text, kind: grammar\|tone, tone?}` → `{text}`. Only the caller's own draft; the draft is not changed |
+| GET · POST · PUT/DELETE `:id` | `/automation-rules` | 🔒 `automation.manage`. `{name, description?, trigger: MESSAGE_RECEIVED\|LEAD_DETECTED\|USER_ABSENT, departmentId?, isEnabled, conditions{match, conditions[{field, op, value}]}, actions[]}`. Actions: `assign`, `set_priority`, `set_status`, `add_tag`, `notify`, `create_task`, `create_lead`, `request_ai_draft`, `reassign_absent`. **No action sends email**; unknown types → 422. Department scope: only rules with their own `departmentId`, acting within it |
+| POST | `/automation-rules/:id/enable` · `/disable` | |
+| POST | `/automation-rules/:id/test` | `{threadId}` → `{matched, reason, facts, actions[{type, detail}]}`. Dry run: writes nothing |
+| GET | `/automation-rules/:id/runs` | Last 100 runs with each action's result |
+| PATCH | `/accounts/:id` | Now also `{aiEnabled}`: false = no content of this mailbox is sent to the AI provider |
+
+**Automatic behaviour**
+- New live inbound mail (not history, spam or trash), when AI is on for the mailbox: the worker analyses it, fires `LEAD_DETECTED` (confidence ≥ 0.7, once per conversation), then runs `MESSAGE_RECEIVED` rules. Without AI, the `MESSAGE_RECEIVED` rules run directly.
+- Marking someone absent fires `USER_ABSENT`.
+- Each rule runs at most once per event (`AutomationRun.idempotencyKey`).
 
 ## Analytics — Phase 9
 | Method | Path | Notes |

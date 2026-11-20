@@ -16,6 +16,7 @@ import { PrismaService, type Tx } from '../prisma/prisma.service';
 import { AuditService, diff } from '../audit/audit.service';
 import { AccessPolicy } from '../access/access-policy.service';
 import { PermissionService } from '../access/permission.service';
+import { QueueService } from '../mail/queue.service';
 import { assertCanGrant } from '../access/grant-guard';
 import { SessionService } from '../auth/session.service';
 import { allowedLoginEmailHint, classifyLoginEmail } from '../auth/login-policy';
@@ -57,6 +58,7 @@ export class UsersService {
     private readonly audit: AuditService,
     private readonly sessions: SessionService,
     @Inject(APP_CONFIG) private readonly cfg: AppConfig,
+    private readonly queue: QueueService,
   ) {}
 
   async list(ctx: RequestContext, q: z.infer<typeof listUsersQuery>) {
@@ -220,7 +222,7 @@ export class UsersService {
 
   async setAbsence(ctx: RequestContext, id: string, input: z.infer<typeof absenceSchema>) {
     if (id !== ctx.userId && !ctx.permissions['user.manage']) throw Errors.forbidden();
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const before = await tx.user.findUnique({ where: { id } });
       if (!before) throw Errors.notFound('Employee');
       const data = { isAbsent: input.isAbsent, absentUntil: input.isAbsent ? (input.absentUntil ?? null) : null };
@@ -232,8 +234,11 @@ export class UsersService {
         before: { isAbsent: before.isAbsent, absentUntil: before.absentUntil },
         after: data,
       });
-      return toSummary(u);
+      return { summary: toSummary(u), becameAbsent: !before.isAbsent && data.isAbsent };
     });
+    // Absence reassignment and other USER_ABSENT automation rules (worker).
+    if (result.becameAbsent) await this.queue.enqueueAutomation({ trigger: 'USER_ABSENT', eventKey: `absent:${id}:${Date.now()}`, userId: id }).catch(() => undefined);
+    return result.summary;
   }
 
   async getOverrides(id: string) {

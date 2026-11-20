@@ -70,6 +70,25 @@ export class StatusService {
     if (to !== t.status) await tx.statusHistory.create({ data: { id: newId(), threadId: t.id, fromStatus: t.status, toStatus: to, changedById: by, source, reason } });
   }
 
+  /** Automation: status and/or priority set by a rule (history source AUTOMATION, audited as AUTOMATION). */
+  async setBySystem(id: string, change: { status?: ConversationStatus; priority?: Priority }, reason: string) {
+    const changed = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM email_threads WHERE id = ${id} FOR UPDATE`);
+      const t = await tx.emailThread.findUniqueOrThrow({ where: { id } });
+      const status = change.status ?? t.status;
+      const priority = change.priority ?? t.priority;
+      if (status === t.status && priority === t.priority) return false;
+      await this.write(tx, t, status, 'AUTOMATION', null, reason.slice(0, 300), { priority });
+      await this.audit.record(tx, { userId: null, actorType: 'AUTOMATION' }, { action: 'thread.automation', entityType: 'EmailThread', entityId: id, before: { status: t.status, priority: t.priority }, after: { status, priority }, metadata: { reason } });
+      return true;
+    });
+    if (changed) {
+      await this.sla.evaluate([id]).catch(() => undefined);
+      await this.events.threadsChanged([id]).catch(() => undefined);
+    }
+    return changed;
+  }
+
   async change(ctx: RequestContext, id: string, input: { status: ManualStatus; reason?: string; followUpAt?: Date | null }) {
     await this.changeable(ctx, id);
     await this.prisma.$transaction(async (tx) => {

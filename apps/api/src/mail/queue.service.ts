@@ -16,7 +16,27 @@ export const QUEUES = {
   slaSweep: 'sla-sweep',
   /** Browser push for one notification. */
   push: 'notify-push',
+  /** AI analysis of a conversation (summary, category, urgency, lead detection). */
+  ai: 'ai-analyze',
+  /** Automation rules for one event. */
+  automation: 'automation-run',
 } as const;
+
+/** Analyse a conversation; then run the automation rules for the new mail. */
+export interface AiJob {
+  threadId: string;
+  /** The inbound message that triggered it (MESSAGE_RECEIVED event key). */
+  messageId: string | null;
+}
+
+export type AutomationTriggerName = 'MESSAGE_RECEIVED' | 'LEAD_DETECTED' | 'USER_ABSENT';
+export interface AutomationJob {
+  trigger: AutomationTriggerName;
+  /** Unique per event: a rule runs at most once for it. */
+  eventKey: string;
+  threadId?: string | null;
+  userId?: string | null;
+}
 
 export type FlagAction = 'read' | 'unread' | 'star' | 'unstar' | 'archive' | 'unarchive' | 'spam' | 'not-spam';
 
@@ -97,6 +117,12 @@ export class QueueService implements OnModuleDestroy {
     if (!existing.has(QUEUES.push)) {
       await boss.createQueue(QUEUES.push, { policy: 'standard', retryLimit: 2, retryDelay: 30, expireInSeconds: 300 });
     }
+    if (!existing.has(QUEUES.ai)) {
+      await boss.createQueue(QUEUES.ai, { policy: 'standard', retryLimit: 2, retryDelay: 60, retryBackoff: true, expireInSeconds: 600 });
+    }
+    if (!existing.has(QUEUES.automation)) {
+      await boss.createQueue(QUEUES.automation, { policy: 'standard', retryLimit: 2, retryDelay: 30, expireInSeconds: 900 });
+    }
     for (const name of [QUEUES.poll, QUEUES.subscriptions, QUEUES.purge, QUEUES.slaSweep]) {
       if (!existing.has(name)) await boss.createQueue(name, { policy: 'singleton', retryLimit: 2 });
     }
@@ -115,6 +141,16 @@ export class QueueService implements OnModuleDestroy {
   async enqueueSend(job: SendJob, startAfter?: Date): Promise<void> {
     const boss = await this.get();
     await boss.send(QUEUES.send, job, startAfter ? { startAfter } : {});
+  }
+
+  async enqueueAi(job: AiJob): Promise<void> {
+    const boss = await this.get();
+    await boss.send(QUEUES.ai, job, { singletonKey: job.threadId });
+  }
+
+  async enqueueAutomation(job: AutomationJob): Promise<void> {
+    const boss = await this.get();
+    await boss.send(QUEUES.automation, job);
   }
 
   async enqueuePush(job: PushJob): Promise<void> {

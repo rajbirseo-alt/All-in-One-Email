@@ -139,7 +139,7 @@ export const connectMailboxSchema = z.object({
   syncDays: z.coerce.number().int().min(1).max(3650).optional(),
 });
 export const updateMailboxSchema = z
-  .object({ displayName: z.string().trim().max(120).nullable().optional(), departmentId: id.nullable().optional() })
+  .object({ displayName: z.string().trim().max(120).nullable().optional(), departmentId: id.nullable().optional(), aiEnabled: z.boolean().optional() })
   .refine((v) => Object.keys(v).length > 0, 'Nothing to update');
 export const mailboxFoldersSchema = z.object({
   folders: z.array(z.object({ folderId: id, syncEnabled: z.boolean() })).min(1).max(500),
@@ -348,6 +348,7 @@ export const NOTIFICATION_TYPES = [
   { type: 'LEAD_ASSIGNED', label: 'Lead assigned to me', description: 'A sales lead is created for you or handed over to you' },
   { type: 'TASK_ASSIGNED', label: 'Task assigned to me', description: 'A colleague gives you a task' },
   { type: 'TASK_DUE', label: 'Task due', description: 'One of your tasks reaches its due time' },
+  { type: 'AUTOMATION', label: 'Automation messages', description: 'An automation rule tells you something, e.g. an AI draft is ready for you to check' },
 ] as const;
 export type ActiveNotificationType = (typeof NOTIFICATION_TYPES)[number]['type'];
 const notificationTypeEnum = z.enum(NOTIFICATION_TYPES.map((t) => t.type) as [ActiveNotificationType, ...ActiveNotificationType[]]);
@@ -539,3 +540,91 @@ export const imapConnectSchema = imapAccountSchema.extend({
   departmentId: id.nullable().optional(),
   syncDays: z.coerce.number().int().min(1).max(3650).optional(),
 });
+
+// ───────────── AI assistant (Phase 8) ─────────────
+
+export const AI_TONES = ['professional', 'friendly', 'concise', 'formal', 'apologetic'] as const;
+export const AI_CATEGORIES = ['SALES_ENQUIRY', 'EXISTING_CLIENT', 'SUPPORT', 'BILLING', 'PARTNERSHIP', 'JOB_APPLICATION', 'VENDOR', 'NEWSLETTER', 'SPAM', 'OTHER'] as const;
+export const AI_SENTIMENTS = ['POSITIVE', 'NEUTRAL', 'NEGATIVE'] as const;
+export const AI_URGENCIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const;
+
+export const suggestReplySchema = z.object({
+  threadId: id,
+  tone: z.enum(AI_TONES).default('professional'),
+  instructions: z.string().trim().max(500).optional(),
+});
+export const rewriteSchema = z.object({
+  /** The draft being edited: decides whether its mailbox allows AI. */
+  draftId: id,
+  text: z.string().trim().min(1).max(20_000),
+  kind: z.enum(['grammar', 'tone']),
+  tone: z.enum(AI_TONES).default('professional'),
+});
+
+// ───────────── Automation (Phase 8) ─────────────
+
+/** Triggers with a working backend. No trigger or action sends email. */
+export const AUTOMATION_TRIGGERS = ['MESSAGE_RECEIVED', 'LEAD_DETECTED', 'USER_ABSENT'] as const;
+export const AUTOMATION_FIELDS = ['mailbox', 'from', 'fromDomain', 'to', 'subject', 'body', 'priority', 'status', 'category', 'urgency', 'sentiment', 'assigned', 'assigneeAbsent'] as const;
+export const AUTOMATION_OPS = ['is', 'contains', 'notContains', 'startsWith', 'endsWith'] as const;
+export const AUTOMATION_ACTIONS = ['assign', 'set_priority', 'set_status', 'add_tag', 'notify', 'create_task', 'create_lead', 'request_ai_draft', 'reassign_absent'] as const;
+export const AUTOMATION_STATUSES = ['IN_PROGRESS', 'WAITING_FOR_CLIENT', 'PENDING_REPLY', 'FOLLOW_UP_REQUIRED', 'REPLY_NOT_NEEDED', 'CLOSED'] as const;
+
+const automationCondition = z.object({
+  field: z.enum(AUTOMATION_FIELDS),
+  op: z.enum(AUTOMATION_OPS),
+  value: z.string().trim().max(500),
+});
+export const automationActionSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('assign'),
+    targetType: z.enum(['USER', 'TEAM', 'DEPARTMENT']),
+    targetUserId: id.nullable().optional(),
+    teamId: id.nullable().optional(),
+    departmentId: id.nullable().optional(),
+    strategy: z.enum(['DIRECT', 'ROUND_ROBIN', 'LEAST_LOADED']).default('ROUND_ROBIN'),
+  }),
+  z.object({ type: z.literal('set_priority'), priority: z.enum(PRIORITIES) }),
+  z.object({ type: z.literal('set_status'), status: z.enum(AUTOMATION_STATUSES) }),
+  z.object({ type: z.literal('add_tag'), tagId: id }),
+  z.object({
+    type: z.literal('notify'),
+    to: z.enum(['assignee', 'team_leader', 'department_manager', 'users']),
+    userIds: z.array(id).max(20).default([]),
+    message: z.string().trim().min(1).max(300),
+  }),
+  z.object({
+    type: z.literal('create_task'),
+    title: z.string().trim().min(1).max(300),
+    dueInHours: z.coerce.number().min(0).max(24 * 90).default(24),
+    assignTo: z.enum(['assignee', 'user']).default('assignee'),
+    userId: id.nullable().optional(),
+  }),
+  z.object({ type: z.literal('create_lead'), serviceInterest: z.string().trim().max(80).nullable().optional() }),
+  z.object({ type: z.literal('request_ai_draft'), tone: z.enum(AI_TONES).default('professional'), instructions: z.string().trim().max(500).optional() }),
+  z.object({ type: z.literal('reassign_absent'), to: z.enum(['pool', 'user']).default('pool'), userId: id.nullable().optional() }),
+]);
+export const automationRuleSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120),
+    description: z.string().trim().max(500).nullable().optional(),
+    trigger: z.enum(AUTOMATION_TRIGGERS),
+    /** Set: the rule only applies to this department's conversations / people. */
+    departmentId: id.nullable().optional(),
+    isEnabled: z.boolean().default(false),
+    conditions: z.object({ match: z.enum(['all', 'any']).default('all'), conditions: z.array(automationCondition).max(20).default([]) }),
+    actions: z.array(automationActionSchema).min(1, 'Add at least one action').max(10),
+  })
+  .superRefine((r, ctx) => {
+    r.actions.forEach((a, i) => {
+      const bad = (message: string) => ctx.addIssue({ code: 'custom', path: ['actions', i], message });
+      if (a.type === 'reassign_absent' && r.trigger !== 'USER_ABSENT') bad('Reassigning an absent person’s conversations only works with the “Employee marked absent” trigger');
+      if (a.type !== 'reassign_absent' && a.type !== 'notify' && r.trigger === 'USER_ABSENT') bad('With “Employee marked absent”, only reassign and notify actions are possible');
+      if (a.type === 'assign' && (a.targetType === 'USER' ? !a.targetUserId : a.targetType === 'TEAM' ? !a.teamId : !a.departmentId)) bad('Choose who to assign to');
+      if (a.type === 'notify' && a.to === 'users' && !a.userIds.length) bad('Choose who to notify');
+      if (a.type === 'create_task' && a.assignTo === 'user' && !a.userId) bad('Choose who gets the task');
+      if (a.type === 'reassign_absent' && a.to === 'user' && !a.userId) bad('Choose who takes over');
+    });
+    if (r.trigger === 'USER_ABSENT' && r.conditions.conditions.length) ctx.addIssue({ code: 'custom', path: ['conditions'], message: 'The absence trigger has no conditions; limit it with a department instead' });
+  });
+export const automationTestSchema = z.object({ threadId: id });

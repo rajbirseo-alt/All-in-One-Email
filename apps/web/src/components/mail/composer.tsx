@@ -6,8 +6,23 @@ import { api, ApiError } from '@/lib/api';
 import { useLoad } from '@/lib/hooks';
 import { formatAddresses, formatBytes, parseAddresses, shortDate, who } from '@/lib/mail';
 import { Button, ErrorBanner, Input, Select } from '@/components/ui';
+import { AI_TONE_LABEL, useAiStatus } from '@/lib/ai';
+import { useSession } from '@/lib/session';
 
 const MODE_LABEL = { NEW: 'New email', REPLY: 'Reply', REPLY_ALL: 'Reply all', FORWARD: 'Forward' } as const;
+
+/** The part of the editor the employee wrote: everything before the signature and the quoted mail. */
+function ownNodes(root: HTMLElement): ChildNode[] {
+  const out: ChildNode[] = [];
+  for (const n of Array.from(root.childNodes)) {
+    if (n instanceof HTMLElement && (n.classList.contains('crm-signature') || n.classList.contains('crm-quote'))) break;
+    out.push(n);
+  }
+  return out;
+}
+
+const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const paragraphs = (t: string) => t.trim().split(/\n{2,}/).map((x) => `<p>${esc(x).replace(/\n/g, '<br>')}</p>`).join('');
 
 export function Composer({ initial, onClose, onSent }: { initial: DraftView; onClose: () => void; onSent: () => void }) {
   const [draft, setDraft] = useState(initial);
@@ -23,6 +38,10 @@ export function Composer({ initial, onClose, onSent }: { initial: DraftView; onC
   const [changed, setChanged] = useState<ThreadChangedDetails | null>(null);
   const [sending, setSending] = useState(false);
   const editor = useRef<HTMLDivElement>(null);
+  const ai = useAiStatus();
+  const { can } = useSession();
+  const [rewrite, setRewrite] = useState<{ text: string; label: string } | null>(null);
+  const [rewriting, setRewriting] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const templates = useLoad(() => api<TemplateView[]>('/templates'), []);
 
@@ -61,6 +80,39 @@ export function Composer({ initial, onClose, onSent }: { initial: DraftView; onC
     timer.current = setTimeout(() => void save(), 1200);
   };
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
+
+  /** AI grammar / tone help on the employee's own text. The result is shown first; nothing changes until they accept it. */
+  const improve = async (choice: string) => {
+    if (!editor.current || !choice) return;
+    const text = ownNodes(editor.current)
+      .map((n) => (n instanceof HTMLElement ? n.innerText : (n.textContent ?? '')))
+      .join('\n\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    if (!text) return setError(new ApiError(0, 'EMPTY', 'Write something first, then ask the AI to improve it'));
+    setRewriting(true);
+    setError(null);
+    try {
+      const body = choice === 'grammar' ? { draftId: draft.id, text, kind: 'grammar' } : { draftId: draft.id, text, kind: 'tone', tone: choice };
+      const r = await api<{ text: string }>('/ai/rewrite', { method: 'POST', body });
+      setRewrite({ text: r.text, label: choice === 'grammar' ? 'Grammar and spelling fixed' : `Rewritten: ${AI_TONE_LABEL[choice] ?? choice}` });
+    } catch (e) {
+      setError(e as ApiError);
+    } finally {
+      setRewriting(false);
+    }
+  };
+  const acceptRewrite = () => {
+    if (!editor.current || !rewrite) return;
+    const own = ownNodes(editor.current);
+    const holder = document.createElement('div');
+    holder.innerHTML = paragraphs(rewrite.text);
+    const anchor = own.length ? own[own.length - 1]!.nextSibling : editor.current.firstChild;
+    for (const n of own) n.remove();
+    for (const n of Array.from(holder.childNodes)) editor.current.insertBefore(n, anchor);
+    setRewrite(null);
+    touched();
+  };
 
   const exec = (cmd: string, value?: string) => {
     editor.current?.focus();
@@ -174,8 +226,19 @@ export function Composer({ initial, onClose, onSent }: { initial: DraftView; onC
         >
           Link
         </button>
+        {ai?.enabled && can('ai.use') && (
+          <Select aria-label="Improve writing with AI" className="ml-auto h-7 w-44 text-[13px]" value="" disabled={rewriting} onChange={(e) => void improve(e.target.value)}>
+            <option value="">{rewriting ? 'Improving…' : 'Improve writing…'}</option>
+            <option value="grammar">Fix grammar and spelling</option>
+            {Object.entries(AI_TONE_LABEL).map(([k, v]) => (
+              <option key={k} value={k}>
+                Make it: {v.toLowerCase()}
+              </option>
+            ))}
+          </Select>
+        )}
         {!!templates.data?.length && (
-          <Select aria-label="Insert template" className="ml-auto h-7 w-44 text-[13px]" value="" onChange={(e) => insertTemplate(e.target.value)}>
+          <Select aria-label="Insert template" className={`${ai?.enabled && can('ai.use') ? '' : 'ml-auto '}h-7 w-44 text-[13px]`} value="" onChange={(e) => insertTemplate(e.target.value)}>
             <option value="">Insert template…</option>
             {templates.data.map((t) => (
               <option key={t.id} value={t.id}>
@@ -200,6 +263,20 @@ export function Composer({ initial, onClose, onSent }: { initial: DraftView; onC
         }}
         className="max-h-[50vh] min-h-40 overflow-y-auto px-3 py-2 text-[14px] leading-relaxed outline-none [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-2 [&_blockquote]:text-text-2"
       />
+      {rewrite && (
+        <div className="border-t border-border bg-accent-soft px-3 py-2 text-[13px]" role="dialog" aria-label="AI suggestion">
+          <p className="font-medium text-accent">{rewrite.label}. Replace your text with this?</p>
+          <p className="my-1.5 rounded bg-surface p-2 whitespace-pre-wrap text-text">{rewrite.text}</p>
+          <div className="flex gap-2">
+            <Button size="sm" variant="primary" onClick={acceptRewrite}>
+              Replace
+            </Button>
+            <Button size="sm" onClick={() => setRewrite(null)}>
+              Keep mine
+            </Button>
+          </div>
+        </div>
+      )}
       {draft.attachments.length > 0 && (
         <ul className="flex flex-wrap gap-2 border-t border-border px-3 py-2">
           {draft.attachments.map((a) => (

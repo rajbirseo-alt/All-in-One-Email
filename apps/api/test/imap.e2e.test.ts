@@ -212,8 +212,11 @@ describe('sending', () => {
     expect(out.from).toBe(address);
     expect(out.to.sort()).toEqual(['asha@client.example', 'boss@seodiscovery.test']);
     expect(out.raw).not.toMatch(/^Bcc:/im);
-    expect(out.raw).toMatch(new RegExp(`^In-Reply-To: ${mid('n2').replace(/[.<>]/g, '\\$&')}`, 'im'));
     const draft = await prisma.draft.findUniqueOrThrow({ where: { id: d.id } });
+    // The reply answers the conversation's latest message (n1 and n2 can share a second).
+    const parent = await prisma.emailMessage.findUniqueOrThrow({ where: { id: draft.inReplyToMessageId! } });
+    expect([mid('n1'), mid('n2')]).toContain(parent.internetMessageId);
+    expect(out.raw).toContain(`In-Reply-To: ${parent.internetMessageId}`);
     const copy = box.find('Sent', draft.messageIdHeader!)!;
     expect(copy).toBeTruthy();
     expect(copy.raw).toMatch(/^Bcc: boss@seodiscovery.test/im);

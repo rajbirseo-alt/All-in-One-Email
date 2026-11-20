@@ -14,6 +14,8 @@ import { MessageFrame } from '@/components/mail/message-frame';
 import { CollabPanel } from '@/components/mail/collab-panel';
 import { StatusPanel } from '@/components/mail/status-panel';
 import { CrmPanel } from '@/components/mail/crm-panel';
+import { AiPanel } from '@/components/mail/ai-panel';
+import { useAiStatus } from '@/lib/ai';
 
 const VIEWS: { key: string; label: string }[] = [
   { key: 'inbox', label: 'Inbox' },
@@ -60,6 +62,7 @@ export default function InboxRoute() {
 
 function InboxPage() {
   const { can, me } = useSession();
+  const ai = useAiStatus();
   const router = useRouter();
   const params = useSearchParams();
   const linked = params.get('thread');
@@ -529,6 +532,7 @@ function InboxPage() {
             )}
             </div>
             <div className="flex flex-col gap-3 xl:order-last">
+              {can('ai.use') && ai?.enabled && <AiPanel thread={detail} canReply={detail.canReply} onDraft={(d) => setComposer(d)} />}
               <StatusPanel thread={detail} onChanged={() => (void loadDetail(detail.id, images), void loadList(), void counts.reload())} />
               {(can('contact.read') || can('lead.read') || can('task.read')) && <CrmPanel thread={detail} />}
               <CollabPanel thread={detail} onChanged={() => (void loadDetail(detail.id, images), void loadList())} />

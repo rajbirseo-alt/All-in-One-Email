@@ -131,6 +131,7 @@ export class MailboxService {
     return {
       ...this.toSummary(a, c),
       syncFromDate: iso(a.syncFromDate),
+      aiEnabled: a.aiEnabled,
       folders: a.folders.map((f) => ({
         id: f.id,
         name: f.name,
@@ -168,7 +169,7 @@ export class MailboxService {
     }
     await this.prisma.$transaction(async (tx) => {
       const after = await tx.emailAccount.update({ where: { id }, data: input });
-      const d = diff(before, { displayName: after.displayName, departmentId: after.departmentId });
+      const d = diff(before, { displayName: after.displayName, departmentId: after.departmentId, aiEnabled: after.aiEnabled });
       if (d.changed) await this.audit.record(tx, ctx, { action: 'account.update', entityType: 'EmailAccount', entityId: id, before: d.before, after: d.after });
     });
     return this.detail(id);

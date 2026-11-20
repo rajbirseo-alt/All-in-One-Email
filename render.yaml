@@ -86,6 +86,13 @@ projects:
                 sync: false
               - key: VAPID_SUBJECT # e.g. mailto:it@seodiscovery.com
                 sync: false
+              # AI assistant (optional, Phase 8). Off until a key is set; mailboxes can opt out in Admin → Mailboxes.
+              - key: OPENAI_API_KEY
+                sync: false
+              - key: OPENAI_MODEL # default gpt-4o-mini
+                sync: false
+              - key: AI_AUTO_ANALYZE # true (default): analyse new mail automatically
+                sync: false
 
           - type: worker
             name: crm-worker
@@ -190,6 +197,21 @@ projects:
                   type: pserv
                   name: crm-api
                   envVarKey: VAPID_SUBJECT
+              - key: OPENAI_API_KEY
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: OPENAI_API_KEY
+              - key: OPENAI_MODEL
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: OPENAI_MODEL
+              - key: AI_AUTO_ANALYZE
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: AI_AUTO_ANALYZE
 
           - type: web
             name: crm-web

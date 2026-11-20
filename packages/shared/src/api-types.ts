@@ -164,6 +164,8 @@ export interface SyncLogEntry {
 
 export interface MailboxDetail extends MailboxSummary {
   syncFromDate: string | null;
+  /** False: no content of this mailbox is sent to the AI provider. */
+  aiEnabled: boolean;
   folders: MailboxFolderInfo[];
   subscriptions: { id: string; provider: string; resource: string; status: string; expiresAt: string; lastNotifiedAt: string | null }[];
   access: MailboxAccessGrant[];
@@ -612,4 +614,77 @@ export interface ImapSettingsView {
   username: string;
   imap: { host: string; port: number; security: 'TLS' | 'STARTTLS' };
   smtp: { host: string; port: number; security: 'TLS' | 'STARTTLS' };
+}
+
+// ───────────── AI assistant (Phase 8) ─────────────
+
+export interface ThreadInsights {
+  /** AI is configured on the server and allowed for this conversation's mailbox. */
+  available: boolean;
+  /** Why not, when unavailable. */
+  reason: string | null;
+  /** A newer message arrived after the analysis. */
+  stale: boolean;
+  analyzedAt: string | null;
+  model: string | null;
+  summary: string | null;
+  category: string | null;
+  sentiment: string | null;
+  urgency: { level: string; reason: string } | null;
+  lead: { isLead: boolean; confidence: number; serviceInterest: string | null; companyName: string | null; reason: string } | null;
+  followUp: { needed: boolean; inDays: number | null; action: string | null } | null;
+}
+
+export interface AiSuggestionView {
+  id: string;
+  threadId: string | null;
+  kind: string;
+  status: string;
+  content: string;
+  tone: string | null;
+  model: string;
+  draftId: string | null;
+  createdAt: string;
+}
+
+export interface AiStatus {
+  enabled: boolean;
+  model: string | null;
+  autoAnalyze: boolean;
+}
+
+// ───────────── Automation (Phase 8) ─────────────
+
+export interface AutomationRuleView {
+  id: string;
+  name: string;
+  description: string | null;
+  trigger: string;
+  department: { id: string; name: string } | null;
+  isEnabled: boolean;
+  position: number;
+  conditions: { match: 'all' | 'any'; conditions: { field: string; op: string; value: string }[] };
+  actions: ({ type: string } & Record<string, unknown>)[];
+  lastRun: { status: string; startedAt: string } | null;
+  runCount: number;
+  canEdit: boolean;
+}
+
+export interface AutomationRunView {
+  id: string;
+  status: string;
+  error: string | null;
+  thread: { id: string; subject: string } | null;
+  output: { type: string; ok: boolean; detail: string }[];
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export interface AutomationTestResult {
+  matched: boolean;
+  /** Why not, when it does not apply (other department, condition not met, …). */
+  reason: string | null;
+  facts: Record<string, string>;
+  /** What each action would do; nothing is written. */
+  actions: { type: string; detail: string }[];
 }

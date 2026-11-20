@@ -228,13 +228,16 @@ export class AssignmentService {
     return [...people].sort((a, b) => (count.get(a.id) ?? 0) - (count.get(b.id) ?? 0) || (last.get(a.id) ?? 0) - (last.get(b.id) ?? 0))[0]!;
   }
 
-  /** Assigns into a pool with a strategy, atomically (pick + assign under the pool lock). */
+  /**
+   * Assigns into a pool with a strategy, atomically (pick + assign under the pool lock). Rule
+   * routing records the strategy as the method; automation and absence keep their own method.
+   */
   async assignToPool(threadId: string, pool: { teamId?: string | null; departmentId?: string | null }, strategy: AssignmentStrategy, meta: AssignMeta) {
     if (strategy === 'DIRECT') return this.apply(threadId, { teamId: pool.teamId ?? null, departmentId: pool.departmentId ?? null }, meta);
     return this.prisma.$transaction(async (tx) => {
       const who = await this.pick(pool, strategy, tx, true);
       // The lock is held until this transaction ends; apply() runs its own row-locked transaction.
-      return this.apply(threadId, { assigneeId: who?.id ?? null, teamId: pool.teamId ?? null, departmentId: pool.departmentId ?? null }, { ...meta, method: who ? (strategy === 'ROUND_ROBIN' ? 'ROUND_ROBIN' : 'LEAST_LOADED') : meta.method });
+      return this.apply(threadId, { assigneeId: who?.id ?? null, teamId: pool.teamId ?? null, departmentId: pool.departmentId ?? null }, { ...meta, method: who && meta.method === 'RULE' ? (strategy === 'ROUND_ROBIN' ? 'ROUND_ROBIN' : 'LEAST_LOADED') : meta.method });
     }, { timeout: 20_000 });
   }
 }
