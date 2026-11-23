@@ -10,7 +10,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
     const res = host.switchToHttp().getResponse<Response>();
     const [status, body] = this.map(exception);
-    if (status >= 500) this.log.error(exception instanceof Error ? exception.stack : String(exception));
+    if (status >= 500) { this.log.error(exception instanceof Error ? exception.stack : String(exception)); if (process.env.DEBUG_500) console.error(exception); }
     res.status(status).json(body);
   }
 

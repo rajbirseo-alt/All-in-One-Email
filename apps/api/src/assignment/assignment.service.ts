@@ -8,7 +8,7 @@ import { Errors } from '../common/errors';
 import type { RequestContext } from '../common/request-context';
 import { EventsPublisher } from '../events/events.service';
 import { NotificationsService, type Outbox } from '../notifications/notifications.service';
-import { PrismaService, type Tx } from '../prisma/prisma.service';
+import { PrismaService, asSystem, systemStep, type Tx } from '../prisma/prisma.service';
 import { SlaService } from '../sla/sla.service';
 
 export interface AssignTarget {
@@ -141,10 +141,15 @@ export class AssignmentService {
           });
         }
         const status = assigneeId && t.status === 'NEW' ? 'ASSIGNED' : !assigneeId && t.status === 'ASSIGNED' ? 'NEW' : t.status;
-        await tx.emailThread.update({
-          where: { id: threadId },
-          data: { assigneeId, teamId, departmentId, status, ...(meta.setPriority ? { priority: meta.setPriority } : {}) },
-        });
+        // After a hand-over the conversation may no longer be visible to whoever handed it over, and
+        // Postgres RLS checks the new row against the read policy. The hand-over itself was authorised
+        // above (assignable / rule), so this one write runs as the system.
+        await systemStep(tx, () =>
+          tx.emailThread.updateMany({
+            where: { id: threadId },
+            data: { assigneeId, teamId, departmentId, status, ...(meta.setPriority ? { priority: meta.setPriority } : {}) },
+          }),
+        );
         if (status !== t.status) {
           await tx.statusHistory.create({
             data: { id: newId(), threadId, fromStatus: t.status, toStatus: status, changedById: meta.actor?.userId ?? null, source: meta.actor ? 'USER' : 'SYSTEM', reason: 'assignment' },
@@ -176,9 +181,12 @@ export class AssignmentService {
     );
     if (pending.outbox) await this.notifications.flush(pending.outbox);
     if (changed) {
-      // A new department or priority can mean a different SLA policy.
-      await this.sla.evaluate([threadId]).catch(() => undefined);
-      await this.events.threadsChanged([threadId]);
+      // A new department or priority can mean a different SLA policy. System follow-ups: they must
+      // also run when the conversation has just left the actor's view.
+      await asSystem(async () => {
+        await this.sla.evaluate([threadId]).catch(() => undefined);
+        await this.events.threadsChanged([threadId]);
+      });
     }
     return changed;
   }

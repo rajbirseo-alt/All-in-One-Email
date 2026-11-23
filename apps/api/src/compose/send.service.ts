@@ -10,6 +10,7 @@ import { MAIL_ENDPOINTS, type MailEndpoints } from '../mail/mail-endpoints';
 import type { SendJob } from '../mail/queue.service';
 import { SyncService } from '../mail/sync.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ApiException } from '../common/errors';
 import { AttachmentsService } from '../threads/attachments.service';
 import { buildMime, htmlToText } from './mime';
 
@@ -57,7 +58,8 @@ export class SendService {
       await this.record(draft, sent);
       return 'sent';
     } catch (e) {
-      const retry = e instanceof TransientError || e instanceof RateLimitedError;
+      // A virus scanner outage (503) is temporary too: the files are scanned on the next attempt.
+      const retry = e instanceof TransientError || e instanceof RateLimitedError || (e instanceof ApiException && e.getStatus() === 503);
       const message =
         e instanceof AuthError ? 'The mailbox needs to be reconnected before mail can be sent.' : e instanceof ProviderRequestError ? `The provider rejected the message: ${e.message}` : (e as Error).message;
       await this.prisma.draft.update({
@@ -77,11 +79,13 @@ export class SendService {
     return draft.inReplyToMessageId ? this.prisma.emailMessage.findUnique({ where: { id: draft.inReplyToMessageId } }) : null;
   }
 
-  private async files(draft: { attachments: { filename: string; contentType: string; content: Uint8Array | null; sourceAttachmentId: string | null }[] }, includeForwarded: boolean) {
+  private async files(draft: { attachments: { id: string; filename: string; contentType: string; content: Uint8Array | null; storageKey: string | null; sourceAttachmentId: string | null }[] }, includeForwarded: boolean) {
     const out: { filename: string; contentType: string; content: Buffer }[] = [];
     for (const a of draft.attachments) {
-      if (a.content) out.push({ filename: a.filename, contentType: a.contentType, content: Buffer.from(a.content) });
-      else if (a.sourceAttachmentId && includeForwarded) out.push({ filename: a.filename, contentType: a.contentType, content: await this.attachments.receivedContent(a.sourceAttachmentId) });
+      const uploaded = await this.attachments.draftContent(a);
+      if (uploaded) out.push({ filename: a.filename, contentType: a.contentType, content: uploaded });
+      // Forwarded files are virus-scanned like downloads; an infected one stops the send.
+      else if (a.sourceAttachmentId && includeForwarded) out.push({ filename: a.filename, contentType: a.contentType, content: await this.attachments.cleanReceived(a.sourceAttachmentId) });
     }
     return out;
   }
@@ -263,9 +267,10 @@ export class SendService {
     await this.prisma.$transaction([
       this.prisma.draft.update({ where: { id: draft.id }, data: { status: 'SENT', sentMessageId: stored.id, sendError: null, threadId: stored.threadId } }),
       // Uploaded bytes are no longer needed once the provider has the message.
-      this.prisma.attachment.updateMany({ where: { draftId: draft.id }, data: { content: null } }),
+      this.prisma.attachment.updateMany({ where: { draftId: draft.id }, data: { content: null, storageKey: null } }),
       this.prisma.syncLog.create({ data: { id: newId(), emailAccountId: draft.emailAccountId, kind: 'SEND', status: 'SUCCEEDED', messagesAdded: 1, details: { draftId: draft.id }, finishedAt: new Date() } }),
     ]);
+    await this.attachments.removeStored(draft.attachments.map((a) => a.storageKey));
     await this.ingest.refreshThreads([stored.threadId]);
     this.log.log(`Sent draft ${draft.id} as ${sent.providerMessageId}`);
   }

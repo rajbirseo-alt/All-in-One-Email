@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { FileStore } from '../storage/file-store.service';
 
 /**
  * Deletes the mail content of mailboxes disconnected longer than MAIL_RETENTION_DAYS (120).
@@ -13,6 +14,7 @@ export class RetentionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly files: FileStore,
   ) {}
 
   async purgeDue(now = new Date()): Promise<number> {
@@ -21,6 +23,12 @@ export class RetentionService {
       select: { id: true, emailAddress: true },
     });
     for (const a of due) {
+      // Stored attachment files (object storage) go with the mail; the rows cascade below.
+      const stored = await this.prisma.attachment.findMany({
+        where: { storageKey: { not: null }, OR: [{ message: { emailAccountId: a.id } }, { draft: { emailAccountId: a.id } }] },
+        select: { storageKey: true },
+      });
+      await this.files.remove(stored.map((s) => s.storageKey));
       await this.prisma.$transaction(
         async (tx) => {
           const threads = await tx.emailThread.deleteMany({ where: { emailAccountId: a.id } });

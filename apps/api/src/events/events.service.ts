@@ -5,7 +5,7 @@ import { Prisma } from '@crm/db';
 import { AccessPolicy } from '../access/access-policy.service';
 import type { RequestContext } from '../common/request-context';
 import { APP_CONFIG, type AppConfig } from '../config/config';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService, asSystem, asUser } from '../prisma/prisma.service';
 
 export const EVENTS_CHANNEL = 'crm_events';
 export const PRESENCE_CHANNEL = 'crm_presence';
@@ -127,13 +127,15 @@ export class EventsHub implements OnModuleDestroy {
     else m.set(n.userId, { name: n.name, state: n.state, at: n.at });
     const list = this.presenceFor(n.threadId);
     for (const s of this.subscribers) {
-      const ok = await this.prisma.emailThread.count({ where: { AND: [{ id: n.threadId }, await this.access.threadWhere(s.ctx)] } });
+      // Each subscriber is checked as themselves (RLS applies to them, not to whoever opened the listener).
+      const ok = await asUser(s.ctx, async () => await this.prisma.emailThread.count({ where: { AND: [{ id: n.threadId }, await this.access.threadWhere(s.ctx)] } }));
       if (ok) s.res.write(`event: presence\ndata: ${JSON.stringify({ threadId: n.threadId, users: list })}\n\n`);
     }
   }
 
   async subscribe(ctx: RequestContext, res: Response, stillValid: () => Promise<boolean>) {
-    await this.listen();
+    // The shared LISTEN connection and heartbeat must not inherit this request's database context.
+    await asSystem(() => this.listen());
     res.status(200);
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -144,7 +146,7 @@ export class EventsHub implements OnModuleDestroy {
     const sub: Subscriber = { ctx, res, stillValid };
     this.subscribers.add(sub);
     res.on('close', () => this.subscribers.delete(sub));
-    this.heartbeat ??= setInterval(() => void this.beat(), EventsHub.heartbeatMs);
+    this.heartbeat ??= asSystem(() => setInterval(() => void this.beat(), EventsHub.heartbeatMs));
   }
 
   /** Keeps proxies from closing idle streams, and ends streams whose session was revoked. */
@@ -167,10 +169,12 @@ export class EventsHub implements OnModuleDestroy {
 
   private async dispatch(ev: ThreadEvent) {
     for (const s of this.subscribers) {
-      const visible = await this.prisma.emailThread.findMany({
-        where: { AND: [{ id: { in: ev.threadIds } }, await this.access.threadWhere(s.ctx)] },
-        select: { id: true },
-      });
+      const visible = await asUser(s.ctx, async () => await
+        this.prisma.emailThread.findMany({
+          where: { AND: [{ id: { in: ev.threadIds } }, await this.access.threadWhere(s.ctx)] },
+          select: { id: true },
+        }),
+      );
       if (visible.length) s.res.write(`event: thread.updated\ndata: ${JSON.stringify({ threadIds: visible.map((v) => v.id) })}\n\n`);
     }
   }

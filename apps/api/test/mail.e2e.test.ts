@@ -14,6 +14,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { WorkerModule } from '../src/worker.module';
 import { FakeMail } from './fake-mail';
 import { APP_URL, Client, bootApp, clientAs, makeUser, prisma } from './helpers';
+import { FileStore } from '../src/storage/file-store.service';
 
 const PUSH_SA = 'gmail-push@crm-test.iam.gserviceaccount.com';
 const MAIL_ENV = {
@@ -415,7 +416,7 @@ describe('mailbox management', () => {
   });
 
   it('purges mail content once the retention period has passed, keeping the audit trail', async () => {
-    const retention = new RetentionService(app.get(PrismaService), app.get(AuditService));
+    const retention = new RetentionService(app.get(PrismaService), app.get(AuditService), app.get(FileStore));
     expect(await retention.purgeDue()).toBe(0);
     await prisma.emailAccount.update({ where: { id }, data: { purgeAfter: new Date(Date.now() - 1000) } });
     expect(await retention.purgeDue()).toBeGreaterThanOrEqual(1);

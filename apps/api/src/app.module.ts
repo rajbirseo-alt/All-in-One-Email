@@ -1,10 +1,11 @@
 import { Module, type DynamicModule } from '@nestjs/common';
-import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_CONFIG, type AppConfig } from './config/config';
 import { PrismaService } from './prisma/prisma.service';
 import { envelopeProvider } from './crypto.provider';
 import { ApiExceptionFilter } from './common/exception.filter';
+import { DbContextInterceptor } from './common/db-context.interceptor';
 import { AuditService } from './audit/audit.service';
 import { AuditController } from './audit/audit.controller';
 import { PermissionService } from './access/permission.service';
@@ -69,6 +70,7 @@ import { AutomationEngine } from './automation/automation-engine';
 import { AutomationService } from './automation/automation.service';
 import { AiAutomationController } from './automation/ai-automation.controller';
 import { RollupService } from './analytics/rollup.service';
+import { FileStore } from './storage/file-store.service';
 import { AnalyticsService } from './analytics/analytics.service';
 import { AnalyticsController } from './analytics/analytics.controller';
 
@@ -94,6 +96,7 @@ export function mailProviders(cfg: AppConfig, mailEndpoints?: MailEndpoints) {
     SuggestionsService,
     AutomationEngine,
     RollupService,
+    FileStore,
     CredentialService,
     IngestService,
     SyncService,
@@ -151,6 +154,7 @@ export class AppModule {
         { provide: APP_GUARD, useClass: ThrottlerGuard },
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ApiExceptionFilter },
+        { provide: APP_INTERCEPTOR, useClass: DbContextInterceptor },
       ],
     };
   }

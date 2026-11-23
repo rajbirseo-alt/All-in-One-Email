@@ -67,12 +67,24 @@ const schema = z
     AI_AUTO_ANALYZE: bool.default('true'),
     /** One line about the company for reply suggestions. */
     AI_COMPANY_CONTEXT: z.string().max(1000).default('SEO Discovery is a digital marketing agency (SEO, PPC, social media, web design and development).'),
+    /** Attachment storage (Phase 10): any S3-compatible bucket (AWS S3, Cloudflare R2, …). Off when S3_BUCKET is unset. */
+    S3_ENDPOINT: z.string().url().optional(),
+    S3_REGION: z.string().default('auto'),
+    S3_BUCKET: z.string().optional(),
+    S3_ACCESS_KEY_ID: z.string().optional(),
+    S3_SECRET_ACCESS_KEY: z.string().optional(),
+    /** Virus scanning (Phase 10): a clamd TCP endpoint. When set, every file is scanned and unscannable files are refused. */
+    CLAMAV_HOST: z.string().optional(),
+    CLAMAV_PORT: z.coerce.number().int().min(1).max(65535).default(3310),
     /** Reports (Phase 9): days, weeks and hourly buckets follow this zone. Changing it needs `npm run cli:analytics-rebuild`. */
     REPORT_TIMEZONE: z.string().default('Asia/Kolkata').refine((tz) => DateTime.now().setZone(tz).isValid, 'not a valid IANA time zone'),
   })
   .superRefine((c, ctx) => {
     if (c.NODE_ENV === 'production' && !c.APP_URL.startsWith('https://')) {
       ctx.addIssue({ code: 'custom', path: ['APP_URL'], message: 'must be https in production' });
+    }
+    if (c.S3_BUCKET) {
+      for (const k of ['S3_ENDPOINT', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY'] as const) if (!c[k]) ctx.addIssue({ code: 'custom', path: [k], message: 'required when S3_BUCKET is set' });
     }
     if (c.ALLOWED_LOGIN_DOMAINS.length === 0) {
       ctx.addIssue({ code: 'custom', path: ['ALLOWED_LOGIN_DOMAINS'], message: 'set at least one company domain' });

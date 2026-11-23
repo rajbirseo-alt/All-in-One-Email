@@ -27,7 +27,7 @@ export interface GmailFakeMessage {
   messageId: string;
   inReplyTo?: string;
   replyTo?: string;
-  attachment?: { filename: string; mime: string; size: number };
+  attachment?: { filename: string; mime: string; size: number; /** Content (default: attachmentBytes(id)). */ bytes?: string };
 }
 
 export interface GraphFakeMessage {
@@ -414,7 +414,7 @@ export class FakeMail {
     if (gatt) {
       const m = b.messages.get(decodeURIComponent(gatt[1]!));
       if (!m?.attachment || decodeURIComponent(gatt[2]!) !== `a-${m.id}`) return this.send(res, 400, { error: { code: 400, message: 'Invalid attachment token' } });
-      return this.send(res, 200, { size: m.attachment.size, data: Buffer.from(attachmentBytes(m.id)).toString('base64url') });
+      return this.send(res, 200, { size: m.attachment.size, data: Buffer.from(m.attachment.bytes ?? attachmentBytes(m.id)).toString('base64url') });
     }
     if (path === '/history') {
       const start = Number(url.searchParams.get('startHistoryId'));

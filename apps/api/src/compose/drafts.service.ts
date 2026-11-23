@@ -11,6 +11,7 @@ import { ApiException, Errors } from '../common/errors';
 import type { RequestContext } from '../common/request-context';
 import { QueueService } from '../mail/queue.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { FileStore } from '../storage/file-store.service';
 import { sanitizeEmailHtml, textToHtml } from '../threads/email-html';
 
 /** Per outgoing message (Gmail and Graph both cap around 25–35 MB including encoding). */
@@ -20,7 +21,7 @@ const BLOCKED_EXT = /\.(exe|bat|cmd|com|scr|pif|msi|msp|js|jse|vbs|vbe|wsf|wsh|p
 
 const draftInclude = {
   emailAccount: { select: { id: true, emailAddress: true, displayName: true, status: true } },
-  attachments: { select: { id: true, filename: true, contentType: true, sizeBytes: true, isInline: true }, orderBy: { createdAt: 'asc' } },
+  attachments: { select: { id: true, filename: true, contentType: true, sizeBytes: true, isInline: true, storageKey: true }, orderBy: { createdAt: 'asc' } },
 } satisfies Prisma.DraftInclude;
 type DraftRow = Prisma.DraftGetPayload<{ include: typeof draftInclude }>;
 
@@ -47,6 +48,7 @@ export class DraftsService {
     private readonly access: AccessPolicy,
     private readonly audit: AuditService,
     private readonly queue: QueueService,
+    private readonly files: FileStore,
   ) {}
 
   private toView(d: DraftRow): DraftView {
@@ -63,7 +65,7 @@ export class DraftsService {
       subject: d.subject,
       bodyHtml: d.bodyHtml,
       baseThreadVersion: d.baseThreadVersion,
-      attachments: d.attachments,
+      attachments: d.attachments.map(({ storageKey: _key, ...a }) => a),
       scheduledFor: d.scheduledFor?.toISOString() ?? null,
       sendError: d.sendError,
       updatedAt: d.updatedAt.toISOString(),
@@ -200,6 +202,7 @@ export class DraftsService {
     const d = await this.own(ctx, id);
     this.editable(d);
     await this.prisma.draft.delete({ where: { id } });
+    await this.files.remove(d.attachments.map((a) => a.storageKey));
   }
 
   async addAttachment(ctx: RequestContext, id: string, file: { originalname: string; mimetype: string; buffer: Buffer }) {
@@ -209,14 +212,20 @@ export class DraftsService {
     if (BLOCKED_EXT.test(name)) throw Errors.validation([{ path: 'file', message: 'Executable files cannot be attached' }]);
     const total = d.attachments.reduce((n, a) => n + a.sizeBytes, 0) + file.buffer.length;
     if (total > MAX_OUTGOING_ATTACHMENTS) throw Errors.validation([{ path: 'file', message: 'Attachments may total at most 25 MB per email' }]);
+    // Scanned before it is stored anywhere; an infected file is refused (422) and never kept.
+    const scanStatus = await this.files.assertClean(file.buffer, `"${name}"`);
+    const attachmentId = newId();
+    const storageKey = this.files.storing ? await this.files.put(attachmentId, file.buffer) : null;
     await this.prisma.attachment.create({
       data: {
-        id: newId(),
+        id: attachmentId,
         draftId: id,
         filename: name,
         contentType: (file.mimetype || 'application/octet-stream').slice(0, 200),
         sizeBytes: file.buffer.length,
-        content: new Uint8Array(file.buffer),
+        content: storageKey ? null : new Uint8Array(file.buffer),
+        storageKey,
+        scanStatus,
         sha256: createHash('sha256').update(file.buffer).digest('hex'),
       },
     });
@@ -226,7 +235,9 @@ export class DraftsService {
   async removeAttachment(ctx: RequestContext, id: string, attachmentId: string) {
     const d = await this.own(ctx, id);
     this.editable(d);
+    const gone = d.attachments.find((a) => a.id === attachmentId);
     await this.prisma.attachment.deleteMany({ where: { id: attachmentId, draftId: id } });
+    await this.files.remove([gone?.storageKey]);
     return this.get(ctx, id);
   }
 
