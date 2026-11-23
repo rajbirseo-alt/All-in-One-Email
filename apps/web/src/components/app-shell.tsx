@@ -9,9 +9,9 @@ import { NotificationBell } from './notification-bell';
 
 /**
  * Navigation lists only modules that are built and that the user may use.
- * Reports etc. appear here in the phases that deliver their backends.
  */
 const MAIL_NAV: { href: string; label: string; anyOf: PermissionKey[] }[] = [
+  { href: '/dashboard', label: 'Dashboard', anyOf: ['report.read'] },
   { href: '/inbox', label: 'Inbox', anyOf: ['conversation.read'] },
   { href: '/settings/compose', label: 'Signatures & templates', anyOf: ['conversation.reply'] },
 ];

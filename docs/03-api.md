@@ -180,17 +180,27 @@ AI calls need `ai.use` covering the conversation (the same scopes as conversatio
 - Marking someone absent fires `USER_ABSENT`.
 - Each rule runs at most once per event (`AutomationRun.idempotencyKey`).
 
-## Analytics — Phase 9
+## Analytics — Phase 9 (as built)
+Range parameters (all range endpoints): `range=today|yesterday|week|month|custom` (week = last 7 days, month = last 30 days, both including today), `from`/`to` (YYYY-MM-DD, inclusive, custom only, at most a year), `departmentId` (narrows; never widens). Days follow `REPORT_TIMEZONE` (default Asia/Kolkata). Every response states `asOf`, the last finished rollup.
+
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/analytics/overview?range=today\|yesterday\|week\|month\|custom&from&to` | Admin/CMO tiles |
-| GET | `/analytics/md` | MD dashboard |
-| GET | `/analytics/me` | Employee dashboard |
-| GET | `/analytics/response-times?groupBy=user\|department\|account` | |
-| GET | `/analytics/workload` · `/analytics/leads/funnel` · `/analytics/trends?metric=&interval=day\|week\|month` | |
-| GET | `/analytics/export.csv?report=` | 🔒 `report.export` |
+| GET | `/analytics/overview` | Range: incoming, outgoing, new conversations, closed, SLA breaches, reply averages (clock and working-hours minutes; first reply and all replies). Now: mailboxes, unread, unassigned, pending, overdue (the inbox view conditions). `ai` token usage for company-wide scope |
+| GET | `/analytics/md` | Management summary: tiles, department table (range + live workload), 12-month trend |
+| GET | `/analytics/me` | The caller's own work: assigned, newly assigned, pending, overdue, follow-ups and tasks due, closed, own average vs team median, next 10 conversations by SLA due |
+| GET | `/analytics/response-times?groupBy=user|department|account` | Per group: incoming, outgoing, replies, averages, closed, SLA breaches |
+| GET | `/analytics/workload?groupBy=user|department` | Now: open, pending, overdue |
+| GET | `/analytics/trends?metric=incoming,replies&interval=day|week|month&periods=` | Up to 4 metrics (`incoming, outgoing, newThreads, replies, avgResponse, avgBusinessResponse, closed, slaBreaches`); empty buckets included |
+| GET | `/analytics/leads/funnel` | Leads created in the range: current status, stages reached, won/lost, won value, conversion |
+| GET | `/analytics/accounts` | Mailbox health (company-wide and department scope only) |
+| GET | `/analytics/export.csv?report=productivity|departments|accounts|daily|leads|workload` | 🔒 `report.export` (plus `report.read` for the scope). UTF-8 CSV with formula cells neutralised; audited as `report.export` |
 
-All analytics are scoped by AccessPolicy. A department manager calling `/analytics/overview` only gets their own department's figures.
+**Scope** (`report.read`): ALL = everything; DEPARTMENT = the departments the caller belongs to or manages (conversation department, else the mailbox's); TEAM = the caller's teams plus the people in teams they lead; OWN = their own figures. `/analytics/me` always shows the caller's own work.
+
+**Definitions** (to be signed off):
+- *Reply time*: from the first unanswered client message in a conversation to the next outgoing message. Shown in working hours (the department's SLA calendar, else the default policy's) and in clock hours.
+- *Incoming / new conversations / SLA breaches* count for the conversation's assignee; *outgoing / replies* for the sender in the CRM (else the assignee); *closed* for whoever closed it.
+- Spam and trash are never counted. Figures of purged mailboxes are kept.
 
 ## WebSocket events (socket.io namespace `/rt`)
 Server → client: `thread.updated`, `thread.new`, `message.new`, `message.sent`, `message.send_failed`, `notification.new`, `presence.thread` (`{threadId, viewers[], composers[]}`), `account.health`, `bulk.progress`.

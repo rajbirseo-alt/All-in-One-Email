@@ -20,6 +20,10 @@ export const QUEUES = {
   ai: 'ai-analyze',
   /** Automation rules for one event. */
   automation: 'automation-run',
+  /** Report rollup of the last few hours (every 10 minutes). */
+  analyticsFast: 'analytics-fast',
+  /** Report rollup of the last two days, catching late changes (hourly). */
+  analyticsSettle: 'analytics-settle',
 } as const;
 
 /** Analyse a conversation; then run the automation rules for the new mail. */
@@ -123,7 +127,7 @@ export class QueueService implements OnModuleDestroy {
     if (!existing.has(QUEUES.automation)) {
       await boss.createQueue(QUEUES.automation, { policy: 'standard', retryLimit: 2, retryDelay: 30, expireInSeconds: 900 });
     }
-    for (const name of [QUEUES.poll, QUEUES.subscriptions, QUEUES.purge, QUEUES.slaSweep]) {
+    for (const name of [QUEUES.poll, QUEUES.subscriptions, QUEUES.purge, QUEUES.slaSweep, QUEUES.analyticsFast, QUEUES.analyticsSettle]) {
       if (!existing.has(name)) await boss.createQueue(name, { policy: 'singleton', retryLimit: 2 });
     }
   }

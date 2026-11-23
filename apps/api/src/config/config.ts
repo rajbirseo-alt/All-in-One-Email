@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DateTime } from 'luxon';
 
 const bool = z
   .enum(['true', 'false', '1', '0'])
@@ -66,6 +67,8 @@ const schema = z
     AI_AUTO_ANALYZE: bool.default('true'),
     /** One line about the company for reply suggestions. */
     AI_COMPANY_CONTEXT: z.string().max(1000).default('SEO Discovery is a digital marketing agency (SEO, PPC, social media, web design and development).'),
+    /** Reports (Phase 9): days, weeks and hourly buckets follow this zone. Changing it needs `npm run cli:analytics-rebuild`. */
+    REPORT_TIMEZONE: z.string().default('Asia/Kolkata').refine((tz) => DateTime.now().setZone(tz).isValid, 'not a valid IANA time zone'),
   })
   .superRefine((c, ctx) => {
     if (c.NODE_ENV === 'production' && !c.APP_URL.startsWith('https://')) {

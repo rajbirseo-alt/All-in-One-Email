@@ -10,8 +10,10 @@
     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
     "test": "vitest run",
     "cli:create-super-admin": "node dist/cli/create-super-admin.js",
+    "cli:analytics-rebuild": "node dist/cli/analytics-rebuild.js",
     "start:local": "node --env-file=../../.env dist/main.js",
-    "cli:local:create-super-admin": "node --env-file=../../.env dist/cli/create-super-admin.js"
+    "cli:local:create-super-admin": "node --env-file=../../.env dist/cli/create-super-admin.js",
+    "cli:local:analytics-rebuild": "node --env-file=../../.env dist/cli/analytics-rebuild.js"
   },
   "devDependencies": {
     "@crm/localdb": "^0.0.0",

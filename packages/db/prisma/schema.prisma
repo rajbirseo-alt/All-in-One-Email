@@ -576,6 +576,7 @@ model EmailThread {
   @@index([contactId])
   @@index([snoozedUntil])
   @@index([emailAccountId, normalizedSubject])
+  @@index([firstMessageAt])
   @@map("email_threads")
 }
 
@@ -629,6 +630,7 @@ model EmailMessage {
   @@index([fromAddress])
   @@index([emailAccountId, receivedAt(sort: Desc)])
   @@index([searchVector], type: Gin, map: "email_messages_searchVector_idx")
+  @@index([receivedAt])
   @@map("email_messages")
 }
 
@@ -890,6 +892,7 @@ model StatusHistory {
   changedBy User?       @relation(fields: [changedById], references: [id])
 
   @@index([threadId, createdAt])
+  @@index([toStatus, createdAt])
   @@map("status_history")
 }
 
@@ -1340,6 +1343,7 @@ model SlaEvent {
   step   SlaStep     @relation(fields: [stepId], references: [id], onDelete: Cascade)
 
   @@unique([threadId, stepId, cycleStart])
+  @@index([firedAt])
   @@map("sla_events")
 }
 
@@ -1535,4 +1539,72 @@ model AuditLog {
   @@index([actorId, createdAt])
   @@index([action, createdAt])
   @@map("audit_logs")
+}
+
+// ───────────────────────────── Analytics (Phase 9) ─────────────────────────────
+// Report tables have no foreign keys on purpose: they outlive the mail they were built from
+// (bodies and threads are purged 120 days after a mailbox is disconnected; the figures stay).
+
+/// One reply to a waiting client message: from the first unanswered inbound message to the next outbound one.
+model ResponseFact {
+  messageId       String   @id // the outbound reply
+  threadId        String
+  emailAccountId  String
+  departmentId    String?
+  teamId          String?
+  userId          String? // who replied (sender in the CRM, else the assignee); null = unknown
+  waitingSince    DateTime
+  respondedAt     DateTime
+  clockMinutes    Int
+  businessMinutes Int? // null when no business calendar applies
+  isFirst         Boolean // the first reply in the conversation
+  createdAt       DateTime @default(now())
+
+  @@index([respondedAt])
+  @@index([threadId])
+  @@map("analytics_response_facts")
+}
+
+/// Hourly rollup per mailbox × department × team × person, in the report time zone.
+model AnalyticsHourly {
+  hour                 DateTime // start of the local hour
+  dimKey               String // "account|department|team|user" ('' = none)
+  emailAccountId       String
+  departmentId         String?
+  teamId               String?
+  userId               String?
+  incoming             Int      @default(0)
+  outgoing             Int      @default(0)
+  newThreads           Int      @default(0)
+  replies              Int      @default(0)
+  replyMinutes         BigInt   @default(0)
+  replyBizMinutes      BigInt   @default(0)
+  replyBizCount        Int      @default(0)
+  firstReplies         Int      @default(0)
+  firstReplyMinutes    BigInt   @default(0)
+  firstReplyBizMinutes BigInt   @default(0)
+  firstReplyBizCount   Int      @default(0)
+  closed               Int      @default(0)
+  slaBreaches          Int      @default(0)
+
+  @@id([hour, dimKey])
+  @@index([hour, departmentId])
+  @@index([hour, userId])
+  @@map("analytics_hourly")
+}
+
+/// Each rollup run (the dashboards show the last finished one as "updated at").
+model AnalyticsRun {
+  id         String    @id
+  kind       String // fast | settle | rebuild
+  fromHour   DateTime
+  toHour     DateTime
+  rows       Int       @default(0)
+  facts      Int       @default(0)
+  error      String?
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([finishedAt(sort: Desc)])
+  @@map("analytics_runs")
 }

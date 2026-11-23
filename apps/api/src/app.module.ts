@@ -68,6 +68,9 @@ import { SuggestionsService } from './ai/suggestions.service';
 import { AutomationEngine } from './automation/automation-engine';
 import { AutomationService } from './automation/automation.service';
 import { AiAutomationController } from './automation/ai-automation.controller';
+import { RollupService } from './analytics/rollup.service';
+import { AnalyticsService } from './analytics/analytics.service';
+import { AnalyticsController } from './analytics/analytics.controller';
 
 /** Providers shared by the HTTP API and the worker process. */
 export function mailProviders(cfg: AppConfig, mailEndpoints?: MailEndpoints) {
@@ -90,6 +93,7 @@ export function mailProviders(cfg: AppConfig, mailEndpoints?: MailEndpoints) {
     DraftsService,
     SuggestionsService,
     AutomationEngine,
+    RollupService,
     CredentialService,
     IngestService,
     SyncService,
@@ -112,7 +116,7 @@ export class AppModule {
     return {
       module: AppModule,
       imports: [ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 300 }])],
-      controllers: [AuthController, UsersController, RolesController, OrgController, AuditController, HealthController, MailboxController, WebhooksController, AssignmentController, StatusController, CrmController, AiAutomationController, ThreadsController, ComposeController, EventsController, SlaController, NotificationsController],
+      controllers: [AuthController, UsersController, RolesController, OrgController, AuditController, HealthController, MailboxController, WebhooksController, AssignmentController, StatusController, CrmController, AiAutomationController, AnalyticsController, ThreadsController, ComposeController, EventsController, SlaController, NotificationsController],
       providers: [
         { provide: APP_CONFIG, useValue: cfg },
         { provide: SSO_PROVIDERS, useFactory: () => opts.ssoProviders ?? buildSsoProviders(cfg) },
@@ -142,6 +146,7 @@ export class AppModule {
         SlaAdminService,
         ContactsService,
         AutomationService,
+        AnalyticsService,
         // Order matters: rate-limit first, then authentication/authorisation.
         { provide: APP_GUARD, useClass: ThrottlerGuard },
         { provide: APP_GUARD, useClass: AuthGuard },

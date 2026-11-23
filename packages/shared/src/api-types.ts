@@ -688,3 +688,115 @@ export interface AutomationTestResult {
   /** What each action would do; nothing is written. */
   actions: { type: string; detail: string }[];
 }
+
+// ───────────── Analytics (Phase 9) ─────────────
+export interface AnalyticsRange {
+  range: string;
+  /** Local dates (report time zone), both inclusive. */
+  from: string;
+  to: string;
+  timezone: string;
+  /** When the figures were last brought up to date (null: not built yet). */
+  asOf: string | null;
+}
+/** Minutes; null when there were no replies (or no business calendar for business minutes). */
+export interface ResponseAverages {
+  replies: number;
+  avgMinutes: number | null;
+  avgBusinessMinutes: number | null;
+  firstReplies: number;
+  avgFirstMinutes: number | null;
+  avgFirstBusinessMinutes: number | null;
+}
+export interface AnalyticsOverview extends AnalyticsRange {
+  /** Range figures. */
+  incoming: number;
+  outgoing: number;
+  newThreads: number;
+  closed: number;
+  slaBreaches: number;
+  response: ResponseAverages;
+  /** Right now. */
+  accounts: number;
+  unread: number;
+  unassigned: number;
+  pending: number;
+  overdue: number;
+  /** Only for company-wide scope. */
+  ai: { analyses: number; inputTokens: number; outputTokens: number } | null;
+}
+export interface ResponseTimeRow extends ResponseAverages {
+  key: string | null;
+  name: string;
+  incoming: number;
+  outgoing: number;
+  closed: number;
+  slaBreaches: number;
+}
+export interface WorkloadRow {
+  key: string | null;
+  name: string;
+  open: number;
+  pending: number;
+  overdue: number;
+}
+export interface TrendPoint {
+  /** Local date of the bucket start. */
+  bucket: string;
+  values: Record<string, number | null>;
+}
+export interface TrendsResult {
+  interval: 'day' | 'week' | 'month';
+  timezone: string;
+  asOf: string | null;
+  points: TrendPoint[];
+}
+export interface LeadFunnel extends AnalyticsRange {
+  total: number;
+  /** Current status of the leads created in the range. */
+  byStatus: { status: string; count: number }[];
+  /** How many of them ever reached each stage (New → Won). */
+  reached: { status: string; count: number }[];
+  won: number;
+  lost: number;
+  wonValue: { currency: string; amount: number }[];
+  conversionRate: number | null;
+}
+export interface AccountHealthRow {
+  id: string;
+  emailAddress: string;
+  displayName: string | null;
+  provider: string;
+  status: string;
+  lastSuccessAt: string | null;
+  lastError: string | null;
+  failures24h: number;
+  incoming: number;
+}
+export interface MdDashboard extends AnalyticsRange {
+  incoming: number;
+  pending: number;
+  unassigned: number;
+  overdue: number;
+  newLeads: number;
+  wonLeads: number;
+  response: ResponseAverages;
+  departments: (ResponseTimeRow & { open: number; pending: number; overdue: number })[];
+  monthly: TrendPoint[];
+}
+export interface MyDashboard extends AnalyticsRange {
+  assigned: number;
+  newAssigned: number;
+  pending: number;
+  overdue: number;
+  followUpsDue: number;
+  tasksDue: number;
+  closed: number;
+  replies: number;
+  myAvgMinutes: number | null;
+  myAvgBusinessMinutes: number | null;
+  /** Median of the average reply times of the people in the caller's teams (null: no team data). */
+  teamMedianMinutes: number | null;
+  teamMedianBusinessMinutes: number | null;
+  nextUp: { id: string; subject: string; priority: string; status: string; awaitingReplySince: string | null; slaDueAt: string | null; overdue: boolean }[];
+}

@@ -20,6 +20,9 @@
   --warning: #9a5b00;
   --warning-soft: #fff4e0;
   --focus: #6366f1;
+  /* Chart series (validated: CVD-safe pair, ≥3:1 on the surface). */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
   color-scheme: light;
 }
 
@@ -43,6 +46,8 @@
     --warning: #fbbf24;
     --warning-soft: #36290f;
     --focus: #a5b4fc;
+    --series-1: #3987e5;
+    --series-2: #d95926;
     color-scheme: dark;
   }
 }
@@ -65,6 +70,8 @@
   --color-success-soft: var(--success-soft);
   --color-warning: var(--warning);
   --color-warning-soft: var(--warning-soft);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
   --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 

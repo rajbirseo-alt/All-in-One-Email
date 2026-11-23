@@ -93,6 +93,9 @@ projects:
                 sync: false
               - key: AI_AUTO_ANALYZE # true (default): analyse new mail automatically
                 sync: false
+              # Reports (Phase 9): days and hours of the dashboards follow this zone.
+              - key: REPORT_TIMEZONE
+                value: Asia/Kolkata
 
           - type: worker
             name: crm-worker
@@ -212,6 +215,11 @@ projects:
                   type: pserv
                   name: crm-api
                   envVarKey: AI_AUTO_ANALYZE
+              - key: REPORT_TIMEZONE
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: REPORT_TIMEZONE
 
           - type: web
             name: crm-web

@@ -628,3 +628,40 @@ export const automationRuleSchema = z
     if (r.trigger === 'USER_ABSENT' && r.conditions.conditions.length) ctx.addIssue({ code: 'custom', path: ['conditions'], message: 'The absence trigger has no conditions; limit it with a department instead' });
   });
 export const automationTestSchema = z.object({ threadId: id });
+
+// ───────────── Analytics (Phase 9) ─────────────
+export const ANALYTICS_RANGES = ['today', 'yesterday', 'week', 'month', 'custom'] as const;
+const localDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'use YYYY-MM-DD');
+export const analyticsRangeQuery = z
+  .object({
+    range: z.enum(ANALYTICS_RANGES).default('week'),
+    /** custom: local dates in the report time zone, both inclusive. */
+    from: localDate.optional(),
+    to: localDate.optional(),
+    /** Narrows the figures to one department (always within the caller's own scope). */
+    departmentId: id.optional(),
+  })
+  .superRefine((q, ctx) => {
+    if (q.range !== 'custom') return;
+    if (!q.from || !q.to) return ctx.addIssue({ code: 'custom', path: ['from'], message: 'A custom range needs from and to' });
+    if (q.from > q.to) ctx.addIssue({ code: 'custom', path: ['to'], message: 'The end date is before the start date' });
+    const days = (Date.parse(q.to) - Date.parse(q.from)) / 86_400_000;
+    if (days > 366) ctx.addIssue({ code: 'custom', path: ['to'], message: 'At most one year at a time' });
+  });
+export const ANALYTICS_GROUPS = ['user', 'department', 'account'] as const;
+export const analyticsGroupQuery = analyticsRangeQuery.and(z.object({ groupBy: z.enum(ANALYTICS_GROUPS).default('user') }));
+export const workloadQuery = z.object({ groupBy: z.enum(['user', 'department']).default('user'), departmentId: id.optional() });
+export const TREND_METRICS = ['incoming', 'outgoing', 'newThreads', 'replies', 'avgResponse', 'avgBusinessResponse', 'closed', 'slaBreaches'] as const;
+export const trendsQuery = z.object({
+  metric: z
+    .string()
+    .default('incoming,replies')
+    .transform((s) => s.split(',').map((m) => m.trim()).filter(Boolean))
+    .pipe(z.array(z.enum(TREND_METRICS)).min(1).max(4)),
+  interval: z.enum(['day', 'week', 'month']).default('day'),
+  /** How many intervals back from today (default 30 days, 12 weeks or 12 months). */
+  periods: z.coerce.number().int().min(1).max(366).optional(),
+  departmentId: id.optional(),
+});
+export const EXPORT_REPORTS = ['productivity', 'departments', 'accounts', 'daily', 'leads', 'workload'] as const;
+export const exportQuery = analyticsRangeQuery.and(z.object({ report: z.enum(EXPORT_REPORTS) }));
