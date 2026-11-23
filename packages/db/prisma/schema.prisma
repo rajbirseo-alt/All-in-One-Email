@@ -10,7 +10,7 @@
 
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["fullTextSearchPostgres", "postgresqlExtensions"]
+  previewFeatures = ["fullTextSearchPostgres", "postgresqlExtensions", "relationJoins"]
 }
 
 datasource db {
@@ -577,6 +577,7 @@ model EmailThread {
   @@index([snoozedUntil])
   @@index([emailAccountId, normalizedSubject])
   @@index([firstMessageAt])
+  @@index([subject(ops: raw("gin_trgm_ops"))], type: Gin, map: "email_threads_subject_trgm_idx")
   @@map("email_threads")
 }
 
@@ -631,6 +632,7 @@ model EmailMessage {
   @@index([emailAccountId, receivedAt(sort: Desc)])
   @@index([searchVector], type: Gin, map: "email_messages_searchVector_idx")
   @@index([receivedAt])
+  @@index([fromAddress(ops: raw("gin_trgm_ops"))], type: Gin, map: "email_messages_fromAddress_trgm_idx")
   @@map("email_messages")
 }
 
@@ -1211,6 +1213,7 @@ enum NotificationType {
   TASK_DUE
   TASK_ASSIGNED
   AUTOMATION // a message from an automation rule, e.g. "AI draft ready"
+  SYSTEM_ALERT // a health check failed or recovered (administrators)
 }
 
 model Notification {
@@ -1607,4 +1610,16 @@ model AnalyticsRun {
 
   @@index([finishedAt(sort: Desc)])
   @@map("analytics_runs")
+}
+
+/// Current state of each system health check, so alerts fire once per problem and once on recovery (Phase 10).
+model SystemAlert {
+  key        String    @id // check key, e.g. "mailbox-sync"
+  status     String // ok | warn | fail
+  detail     String?
+  since      DateTime  @default(now())
+  notifiedAt DateTime?
+  updatedAt  DateTime  @updatedAt
+
+  @@map("system_alerts")
 }

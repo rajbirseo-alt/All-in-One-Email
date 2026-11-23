@@ -202,6 +202,19 @@ Range parameters (all range endpoints): `range=today|yesterday|week|month|custom
 - *Incoming / new conversations / SLA breaches* count for the conversation's assignee; *outgoing / replies* for the sender in the CRM (else the assignee); *closed* for whoever closed it.
 - Spam and trash are never counted. Figures of purged mailboxes are kept.
 
+## Hardening — Phase 10 (as built)
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/system/health` | 🔒 `account.manage`. `{status, checkedAt, checks[{key, label, status: ok|warn|fail, detail, value}]}`: database, worker, queues, mailbox sync, sending, reports, virus scanning, storage |
+| GET | `/metrics` | Public route, `Authorization: Bearer <METRICS_TOKEN>` (404 when unset, 401 when wrong). Prometheus text: `crm_check_status`, `crm_check_value`, `crm_up` |
+
+**New error codes**
+- 422 `MALWARE`: an uploaded, downloaded or forwarded file contains malware; it is never stored or passed on, and is refused again later without rescanning.
+- 503 `SCANNER_UNAVAILABLE`: virus scanning is on but the scanner does not answer. Files are refused, never let through unscanned. Queued sends retry.
+- 429 `RATE_LIMITED` with `Retry-After`: more than `RATE_LIMIT_PER_USER_PER_MIN` requests by one employee. The per-IP limit (`RATE_LIMIT_PER_IP_PER_MIN`) is separate and generous, for offices behind one IP.
+
+**Search** now matches part of a sender address through a trigram index.
+
 ## WebSocket events (socket.io namespace `/rt`)
 Server → client: `thread.updated`, `thread.new`, `message.new`, `message.sent`, `message.send_failed`, `notification.new`, `presence.thread` (`{threadId, viewers[], composers[]}`), `account.health`, `bulk.progress`.
 Client → server: `thread.join` (authorised server-side), `thread.leave`, `thread.composing` (`{threadId, active}`).

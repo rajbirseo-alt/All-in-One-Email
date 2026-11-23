@@ -30,6 +30,7 @@ const NAV: { href: string; label: string; anyOf: PermissionKey[] }[] = [
   { href: '/admin/org', label: 'Departments & teams', anyOf: ['user.read', 'org.manage'] },
   { href: '/admin/roles', label: 'Roles & permissions', anyOf: ['role.manage'] },
   { href: '/admin/audit', label: 'Audit log', anyOf: ['audit.read'] },
+  { href: '/admin/system', label: 'System health', anyOf: ['account.manage'] },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {

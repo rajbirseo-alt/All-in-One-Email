@@ -1,0 +1,64 @@
+# Runbook: production deploy (Render)
+
+For whoever runs SEO Discovery's CRM in production. Everything is defined in `render.yaml` (a Render Blueprint) at the repository root.
+
+## What runs
+
+| Service | Type | What it does | Recommended plan |
+|---|---|---|---|
+| `crm-web` | Web service (public) | Next.js app; proxies `/api/*` to `crm-api` over the private network | Starter is enough |
+| `crm-api` | Private service | NestJS API; the only thing that talks to the database for user requests (with row-level security) | **Standard (1 CPU)**. The load test used ~0.7 CPU for 100 active employees; Starter (0.5 CPU) is too small for that |
+| `crm-worker` | Background worker | Mail sync, IMAP IDLE, sending, SLA, report rollups, health alerts, retention purge | Standard |
+| `crm-db` | PostgreSQL 17 | All data, including the job queue (pg-boss) | Basic-1gb to start; watch disk and connections |
+| ClamAV (optional, recommended) | Private service, Docker image `clamav/clamav:stable` | Virus scanning of attachments on port 3310 | **At least 3 GB RAM** (the signature database lives in memory) |
+
+Object storage for attachments lives outside Render: any S3-compatible bucket. Cloudflare R2 works well (no egress fees).
+
+## First deploy
+
+1. **Render:** connect the GitHub repository and create the Blueprint from `render.yaml`.
+2. **Secrets** (`sync: false` in the Blueprint), on `crm-api`:
+   - `ENCRYPTION_KEYS`: a JSON map of 32-byte base64 keys, e.g. `{"1":"<base64>"}`. **Back this up outside Render.** Without it, mailbox credentials and stored attachments cannot be decrypted, including from a database backup.
+   - `SESSION_SECRET`.
+   - The Google / Microsoft OAuth clients (see `docs/06-provider-integrations.md`).
+   - Optional:
+     - `OPENAI_API_KEY`;
+     - VAPID keys;
+     - S3 (`S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`);
+     - `CLAMAV_HOST` (the ClamAV service's internal hostname);
+     - `METRICS_TOKEN`.
+   - The worker copies these from `crm-api` (`fromService`). Set them once.
+3. **Domain:** add the custom domain to `crm-web` (Render shows the DNS records). Set `APP_URL` to `https://<that domain>`, then update the OAuth redirect URIs to match.
+4. **Deploy.** `crm-api`'s pre-deploy step runs `prisma migrate deploy`. Migrations are forward-only and run before the new version takes traffic.
+5. **First Super Admin:** in the `crm-api` shell, run `npm run cli:create-super-admin -w @crm/api -- --email … --name "…"`.
+6. **Check** Admin → System health. Every line should be green except "Background worker" for the first minute.
+
+## Every deploy
+
+- **Pushing to `main` deploys** (`autoDeployTrigger: commit`). CI must be green first: build, tests, the backup/restore drill and the migration drift check.
+- **Before a migration that rewrites data,** take a manual backup (see [backup-restore.md](backup-restore.md)).
+- **After deploy,** check System health and `GET /api/v1/health`.
+- **Rollback:**
+  1. In Render, roll back `crm-api`, `crm-worker` and `crm-web` to the previous deploy.
+  2. Migrations are not reversed automatically. They are additive by design, so the previous version runs against the newer schema.
+
+## The database role and row-level security
+
+Conversation tables use `FORCE ROW LEVEL SECURITY`. The app's database user (Render's default, a non-superuser owner) is therefore filtered by the policies:
+
+| Connection | Behaviour |
+|---|---|
+| **API** | States the employee on every statement. |
+| **Worker** | Never sets an employee and is trusted. |
+| **Superuser** | Bypasses RLS. **Never point the API at a superuser**, or RLS stops protecting anything. |
+| **Backups** | Need `pg_dump --enable-row-security` (see the backup runbook). |
+
+## Settings worth knowing
+
+| Variable | Default | Notes |
+|---|---|---|
+| `RATE_LIMIT_PER_IP_PER_MIN` | 3000 | The whole office often shares one IP |
+| `RATE_LIMIT_PER_USER_PER_MIN` | 600 | Per signed-in employee |
+| `PERMISSION_CACHE_SECONDS` | 30 | Permission changes reach *other* API instances within this |
+| `REPORT_TIMEZONE` | Asia/Kolkata | Changing it needs `npm run cli:analytics-rebuild -w @crm/api` |
+| `MAIL_RETENTION_DAYS` | 120 | Mail of a disconnected mailbox is purged after this |

@@ -6,7 +6,7 @@ import type { threadListQuery } from '@crm/shared';
 import { AccessPolicy } from '../access/access-policy.service';
 import { Errors } from '../common/errors';
 import type { RequestContext } from '../common/request-context';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService, asSystem } from '../prisma/prisma.service';
 import { sanitizeEmailHtml, textToHtml } from './email-html';
 import { EventsHub } from '../events/events.service';
 import { SlaService } from '../sla/sla.service';
@@ -89,13 +89,27 @@ export class ThreadsService {
     }
   }
 
-  /** Full-text search over message subject, sender and body (generated tsvector + GIN index). */
+  /**
+   * Full-text search over message subject, sender and body (generated tsvector + GIN index).
+   * Only candidate conversation ids come out of here; the list query that uses them applies the
+   * caller's access filter and RLS. These two lookups run as the system because Postgres cannot
+   * use the GIN indexes under a row-level policy (@@ and LIKE are not "leakproof"), which turned a
+   * 100 ms search into a scan of every message (Phase 10 load test).
+   */
   private async searchThreadIds(q: string): Promise<string[]> {
+    return asSystem(() => this.searchCandidates(q));
+  }
+
+  private async searchCandidates(q: string): Promise<string[]> {
     const rows = await this.prisma.$queryRaw<{ threadId: string }[]>(Prisma.sql`
       SELECT DISTINCT "threadId" FROM email_messages
       WHERE "searchVector" @@ websearch_to_tsquery('simple', ${q})
       LIMIT 2000`);
-    return rows.map((r) => r.threadId);
+    // Part of a sender address ("acme" in info@acme.com): trigram index on fromAddress.
+    const like = `%${q.toLowerCase().replace(/[\\%_]/g, (c) => '\\' + c)}%`;
+    const senders = await this.prisma.$queryRaw<{ threadId: string }[]>(Prisma.sql`
+      SELECT DISTINCT "threadId" FROM email_messages WHERE "fromAddress" LIKE ${like} LIMIT 2000`);
+    return [...new Set([...rows, ...senders].map((r) => r.threadId))];
   }
 
   async list(ctx: RequestContext, q: z.infer<typeof threadListQuery>): Promise<{ items: ThreadListItem[]; nextCursor: string | null }> {
@@ -114,7 +128,6 @@ export class ThreadsService {
         OR: [
           { id: { in: ids } },
           { subject: { contains: q.q, mode: 'insensitive' } },
-          { messages: { some: { fromAddress: { contains: q.q.toLowerCase() } } } },
         ],
       });
     }
@@ -124,6 +137,9 @@ export class ThreadsService {
       and.push({ OR: [{ lastMessageAt: { lt: c.at } }, { lastMessageAt: c.at, id: { lt: c.id } }] });
     }
     const rows = await this.prisma.emailThread.findMany({
+      // Separate queries per relation: with RLS, one big JOIN re-checks the policy for every joined
+      // row and was slower in the load test.
+      relationLoadStrategy: 'query',
       where: { AND: and },
       include: listInclude,
       orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }],

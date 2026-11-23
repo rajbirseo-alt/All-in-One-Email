@@ -54,7 +54,7 @@ export class AuthGuard implements CanActivate {
       if (typeof header !== 'string' || typeof cookie !== 'string' || !safeEqual(header, cookie)) throw Errors.csrf();
     }
 
-    const permissions = await this.permissions.effectiveFor(session.userId);
+    const permissions = await this.permissions.forRequest(session.userId);
     req.ctx = {
       userId: session.userId,
       sessionId: session.id,

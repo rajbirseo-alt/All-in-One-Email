@@ -66,7 +66,7 @@ export class RollupService {
     return DateTime.fromJSDate(at, { zone: this.timezone }).startOf('hour').toJSDate();
   }
 
-  /** Scheduled runs: the last few hours every 10 minutes; the last two days every hour. A first run backfills. */
+  /** Scheduled runs: the last few hours every 10 minutes; the last two days every night. A first run backfills. */
   async scheduled(kind: 'fast' | 'settle', now = new Date()) {
     const done = await this.prisma.analyticsRun.count({ where: { finishedAt: { not: null }, error: null } });
     if (!done) return this.rebuild(INITIAL_BACKFILL_DAYS, now);
@@ -79,6 +79,10 @@ export class RollupService {
   async rebuild(days: number, now = new Date()) {
     const end = DateTime.fromJSDate(this.hourStart(now)).plus({ hours: 1 });
     let from = end.setZone(this.timezone).minus({ days }).startOf('day');
+    // Nothing to build before the oldest stored mail (a new install has days, not years).
+    const oldest = await this.prisma.emailMessage.findFirst({ orderBy: { receivedAt: 'asc' }, select: { receivedAt: true } });
+    if (!oldest) from = end.minus({ hours: 1 });
+    else from = DateTime.max(from, DateTime.fromJSDate(oldest.receivedAt, { zone: this.timezone }).startOf('day'));
     let total = { rows: 0, facts: 0 };
     while (from < end) {
       const to = DateTime.min(from.plus({ days: CHUNK_DAYS }), end);
@@ -135,18 +139,19 @@ export class RollupService {
         WHERE direction = 'OUTBOUND' AND NOT "isDraft" AND "receivedAt" >= ${from} AND "receivedAt" < ${to}
       ),
       m AS (
+        -- grp = outgoing messages before this one, so the client messages waiting for an outgoing
+        -- reply share its grp (later client messages get grp + 1). Window functions only: one pass.
         SELECT m.id, m."threadId", m.direction, m."receivedAt" AS at, m."sentByUserId",
-               row_number() OVER w AS rn,
                count(*) FILTER (WHERE m.direction = 'OUTBOUND') OVER (w ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS grp
         FROM email_messages m JOIN touched t ON t."threadId" = m."threadId"
         WHERE NOT m."isDraft"
         WINDOW w AS (PARTITION BY m."threadId" ORDER BY m."receivedAt", m.id)
       ),
+      g AS (
+        SELECT m.*, min(m.at) FILTER (WHERE m.direction = 'INBOUND') OVER (PARTITION BY m."threadId", m.grp) AS since FROM m
+      ),
       pairs AS (
-        SELECT o.id, o."threadId", o."sentByUserId", o.at AS responded, min(i.at) AS since
-        FROM m o JOIN m i ON i."threadId" = o."threadId" AND i.direction = 'INBOUND' AND i.grp = o.grp AND i.rn < o.rn
-        WHERE o.direction = 'OUTBOUND'
-        GROUP BY o.id, o."threadId", o."sentByUserId", o.at
+        SELECT g.id, g."threadId", g."sentByUserId", g.at AS responded, g.since FROM g WHERE g.direction = 'OUTBOUND' AND g.since IS NOT NULL
       ),
       ranked AS (
         SELECT p.*, row_number() OVER (PARTITION BY p."threadId" ORDER BY p.responded, p.id) = 1 AS "isFirst" FROM pairs p
@@ -197,7 +202,8 @@ export class RollupService {
       INSERT INTO analytics_hourly (hour, "dimKey", "emailAccountId", "departmentId", "teamId", "userId",
         incoming, outgoing, "newThreads", replies, "replyMinutes", "replyBizMinutes", "replyBizCount",
         "firstReplies", "firstReplyMinutes", "firstReplyBizMinutes", "firstReplyBizCount", closed, "slaBreaches")
-      WITH t AS (
+      -- NOT MATERIALIZED: each part joins only the threads of its own rows in the window.
+      WITH t AS NOT MATERIALIZED (
         SELECT th.id, th."emailAccountId" AS acc, COALESCE(th."departmentId", a."departmentId") AS dept, th."teamId" AS team, th."assigneeId" AS usr
         FROM email_threads th JOIN email_accounts a ON a.id = th."emailAccountId"
         WHERE NOT th."isSpam" AND NOT th."isTrashed" AND a."purgedAt" IS NULL

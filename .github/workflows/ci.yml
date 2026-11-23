@@ -36,6 +36,16 @@ jobs:
       - name: Test
         run: npm test
 
+      # Backup + restore drill (docs/runbooks/backup-restore.md): pg_dump / pg_restore 17 from the
+      # PostgreSQL service container, a database owned by a non-superuser role, RLS checked after restore.
+      - name: Backup and restore drill
+        run: node tools/backup/restore-drill.mts
+        env:
+          DRILL_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres
+          DRILL_PG_DUMP: docker exec -i ${{ job.services.postgres.id }} pg_dump
+          DRILL_PG_RESTORE: docker exec -i ${{ job.services.postgres.id }} pg_restore
+          DRILL_TOOL_HOST: localhost:5432
+
       - name: Migrations match the schema
         run: >
           node node_modules/prisma/build/index.js migrate diff

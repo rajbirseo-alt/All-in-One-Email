@@ -64,22 +64,32 @@ BEGIN
     SELECT id FROM email_accounts WHERE "departmentId" = ANY (depts));
 END $$;
 
--- @-mentioned in a (not deleted) note of the conversation. Reads internal_notes as the system
--- (app.system on for the duration of the lookup), so the notes policy does not recurse into this one.
-CREATE OR REPLACE FUNCTION crm_rls_mentioned(thread_id text, uid text) RETURNS boolean LANGUAGE plpgsql VOLATILE AS $$
-DECLARE
-  prev text := current_setting('app.system', true);
-  found boolean;
+-- Conversations shared with the caller.
+CREATE OR REPLACE FUNCTION crm_rls_shared() RETURNS text[] LANGUAGE plpgsql STABLE AS $$
+DECLARE uid text := crm_rls_uid();
 BEGIN
-  IF uid IS NULL THEN RETURN false; END IF;
-  PERFORM set_config('app.system', 'on', true);
-  SELECT EXISTS (
-    SELECT 1 FROM internal_notes n JOIN note_mentions m ON m."noteId" = n.id
-     WHERE n."threadId" = thread_id AND n."deletedAt" IS NULL AND m."userId" = uid) INTO found;
-  PERFORM set_config('app.system', coalesce(prev, ''), true);
-  RETURN found;
+  IF uid IS NULL THEN RETURN '{}'::text[]; END IF;
+  RETURN ARRAY(SELECT "threadId" FROM thread_shares WHERE "userId" = uid);
 END $$;
 
+-- Conversations where the caller is @-mentioned in a (not deleted) note. Reads internal_notes as
+-- the system (app.system on for the lookup), so the notes policy does not recurse into this one.
+CREATE OR REPLACE FUNCTION crm_rls_mentioned() RETURNS text[] LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+  uid text := crm_rls_uid();
+  prev text := current_setting('app.system', true);
+  ids text[];
+BEGIN
+  IF uid IS NULL THEN RETURN '{}'::text[]; END IF;
+  PERFORM set_config('app.system', 'on', true);
+  ids := ARRAY(SELECT DISTINCT n."threadId" FROM note_mentions m JOIN internal_notes n ON n.id = m."noteId" WHERE m."userId" = uid AND n."deletedAt" IS NULL);
+  PERFORM set_config('app.system', coalesce(prev, ''), true);
+  RETURN ids;
+END $$;
+
+-- Every per-caller value above is wrapped in (SELECT …), so Postgres computes it once per
+-- statement (InitPlan) and the per-row test is a few comparisons.
+--
 -- One policy per command: reading, inserting and deleting need the conversation to be visible;
 -- an update needs the row to be visible before the change only (assigning a conversation to
 -- another team legitimately makes it invisible to the person who did it).
@@ -100,8 +110,8 @@ SELECT crm_rls_policies('email_threads', $p$
     OR "emailAccountId" = ANY ((SELECT crm_rls_accounts())::text[])
     OR ((SELECT crm_rls_rank()) >= 2 AND ("teamId" = ANY ((SELECT crm_rls_teams())::text[]) OR "assigneeId" = ANY ((SELECT crm_rls_led_members())::text[])))
     OR ((SELECT crm_rls_rank()) >= 3 AND "departmentId" = ANY ((SELECT crm_rls_depts())::text[]))
-    OR EXISTS (SELECT 1 FROM thread_shares s WHERE s."threadId" = email_threads.id AND s."userId" = (SELECT crm_rls_uid()))
-    OR crm_rls_mentioned(email_threads.id, (SELECT crm_rls_uid()))
+    OR id = ANY ((SELECT crm_rls_shared())::text[])
+    OR id = ANY ((SELECT crm_rls_mentioned())::text[])
   ))
 $p$);
 

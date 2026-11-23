@@ -40,6 +40,12 @@ const schema = z
     SESSION_IDLE_HOURS: z.coerce.number().positive().default(12),
     SESSION_MAX_DAYS: z.coerce.number().positive().default(7),
     LOGIN_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(10),
+    /** All requests from one IP per minute (an office shares one IP: keep this generous). */
+    RATE_LIMIT_PER_IP_PER_MIN: z.coerce.number().int().min(1).default(3000),
+    /** Requests of one signed-in employee per minute. */
+    RATE_LIMIT_PER_USER_PER_MIN: z.coerce.number().int().min(1).default(600),
+    /** How long an employee's effective permissions are reused between requests (0 = never). */
+    PERMISSION_CACHE_SECONDS: z.coerce.number().int().min(0).max(300).default(30),
 
     // ── Mailboxes (Phase 2). Connecting reuses GOOGLE_* / MICROSOFT_* client credentials. ──
     /** How far back the first sync of a new mailbox goes. */
@@ -76,6 +82,8 @@ const schema = z
     /** Virus scanning (Phase 10): a clamd TCP endpoint. When set, every file is scanned and unscannable files are refused. */
     CLAMAV_HOST: z.string().optional(),
     CLAMAV_PORT: z.coerce.number().int().min(1).max(65535).default(3310),
+    /** Monitoring (Phase 10): bearer token for GET /api/v1/metrics (off when unset). */
+    METRICS_TOKEN: z.string().min(24).optional(),
     /** Reports (Phase 9): days, weeks and hourly buckets follow this zone. Changing it needs `npm run cli:analytics-rebuild`. */
     REPORT_TIMEZONE: z.string().default('Asia/Kolkata').refine((tz) => DateTime.now().setZone(tz).isValid, 'not a valid IANA time zone'),
   })

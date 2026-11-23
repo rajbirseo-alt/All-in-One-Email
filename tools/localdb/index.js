@@ -52,17 +52,18 @@ async function startLocalPostgres({ dataDir, port, persistent = true }) {
       // The app role owns the database and everything in it (databases made before this change too).
       await admin('postgres', (c) => c.query(`ALTER DATABASE "${db}" OWNER TO ${APP_ROLE}`));
       await admin(db, async (c) => {
-        await c.query(`ALTER SCHEMA public OWNER TO ${APP_ROLE}`);
+        const schemas = (await c.query("SELECT nspname FROM pg_namespace WHERE left(nspname, 3) <> 'pg_' AND nspname <> 'information_schema'")).rows.map((r) => r.nspname);
+        for (const sch of schemas) await c.query(`ALTER SCHEMA "${sch}" OWNER TO ${APP_ROLE}`);
         const { rows } = await c.query(`
           SELECT format('ALTER %s %s OWNER TO ${APP_ROLE}', CASE c.relkind WHEN 'S' THEN 'SEQUENCE' WHEN 'v' THEN 'VIEW' ELSE 'TABLE' END, c.oid::regclass) AS sql
             FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-           WHERE n.nspname = 'public' AND c.relkind IN ('r', 'S', 'v', 'p') AND pg_get_userbyid(c.relowner) <> '${APP_ROLE}'
+           WHERE n.nspname = ANY ($1) AND c.relkind IN ('r', 'S', 'v', 'p') AND pg_get_userbyid(c.relowner) <> '${APP_ROLE}'
           UNION ALL
           SELECT format('ALTER FUNCTION %s OWNER TO ${APP_ROLE}', p.oid::regprocedure) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-           WHERE n.nspname = 'public' AND pg_get_userbyid(p.proowner) <> '${APP_ROLE}' AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')
+           WHERE n.nspname = ANY ($1) AND pg_get_userbyid(p.proowner) <> '${APP_ROLE}' AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')
           UNION ALL
           SELECT format('ALTER TYPE %s OWNER TO ${APP_ROLE}', t.oid::regtype) FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
-           WHERE n.nspname = 'public' AND t.typtype = 'e' AND pg_get_userbyid(t.typowner) <> '${APP_ROLE}'`);
+           WHERE n.nspname = ANY ($1) AND t.typtype = 'e' AND pg_get_userbyid(t.typowner) <> '${APP_ROLE}'`, [schemas]);
         for (const r of rows) await c.query(r.sql);
       });
     },

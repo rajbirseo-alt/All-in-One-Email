@@ -28,7 +28,9 @@ export class FakeClamd {
         if (!headerDone) {
           const end = buf.indexOf(0);
           if (end < 0) return;
-          if (buf.subarray(0, end).toString() !== 'zINSTREAM') return void sock.end('UNKNOWN COMMAND\0');
+          const cmd = buf.subarray(0, end).toString();
+          if (cmd === 'zPING') return void sock.end('PONG\0');
+          if (cmd !== 'zINSTREAM') return void sock.end('UNKNOWN COMMAND\0');
           buf = buf.subarray(end + 1);
           headerDone = true;
         }

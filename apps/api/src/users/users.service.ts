@@ -144,7 +144,7 @@ export class UsersService {
   }
 
   async update(ctx: RequestContext, id: string, input: UpdateUserInput) {
-    return this.prisma.$transaction(async (tx) => {
+    const out = await this.prisma.$transaction(async (tx) => {
       const before = await tx.user.findUnique({ where: { id } });
       if (!before) throw Errors.notFound('Employee');
       await this.assertRefs(tx, input, id);
@@ -167,6 +167,8 @@ export class UsersService {
       });
       return toSummary(u);
     });
+    this.perms.invalidate(id);
+    return out;
   }
 
   async updateSelf(ctx: RequestContext, input: z.infer<typeof updateSelfSchema>) {
@@ -258,7 +260,7 @@ export class UsersService {
       ctx,
       input.overrides.filter((o) => o.effect === 'GRANT').map((o) => ({ key: o.permissionKey, scope: (o.scope ?? 'OWN') as Scope })),
     );
-    return this.prisma.$transaction(async (tx) => {
+    const out = await this.prisma.$transaction(async (tx) => {
       if (!(await tx.user.findUnique({ where: { id } }))) throw Errors.notFound('Employee');
       if (id === ctx.userId && input.overrides.some((o) => o.effect === 'GRANT')) {
         throw Errors.forbidden('You cannot grant extra permissions to yourself');
@@ -283,5 +285,7 @@ export class UsersService {
       await this.audit.record(tx, ctx, { action: 'user.permission_overrides', entityType: 'user', entityId: id, before, after: input.overrides });
       return this.perms.effectiveFor(id, tx);
     });
+    this.perms.invalidate(id);
+    return out;
   }
 }

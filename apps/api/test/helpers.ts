@@ -21,6 +21,8 @@ export function testConfig(over: Record<string, string> = {}): AppConfig {
     ALLOWED_LOGIN_DOMAINS: DOMAIN,
     PASSWORD_LOGIN_ENABLED: 'true',
     LOGIN_RATE_LIMIT_PER_MIN: '1000',
+    // Tests change roles and overrides straight in the database and expect the next request to see it.
+    PERMISSION_CACHE_SECONDS: '0',
     ...over,
   });
 }

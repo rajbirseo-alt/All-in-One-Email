@@ -15,6 +15,7 @@ import { InsightsService, LEAD_CONFIDENCE } from '../ai/insights.service';
 import { AutomationEngine } from '../automation/automation-engine';
 import type { AiJob, AutomationJob } from './queue.service';
 import { RollupService } from '../analytics/rollup.service';
+import { SystemHealthService } from '../health/system-health.service';
 
 /** Schedules (UTC). */
 export const SCHEDULES = {
@@ -27,7 +28,9 @@ export const SCHEDULES = {
   slaSweep: '* * * * *',
   /** Report rollups (Phase 9). */
   analyticsFast: '*/10 * * * *',
-  analyticsSettle: '17 * * * *',
+  /** 20:45 UTC = 02:15 IST: the last two days again, at night (heavy at scale; see the load test). */
+  analyticsSettle: '45 20 * * *',
+  healthAlerts: '*/5 * * * *',
 } as const;
 
 /** Runs in the worker process only: job handlers and cron schedules. */
@@ -51,6 +54,7 @@ export class MailWorkerService {
     private readonly insights: InsightsService,
     private readonly automation: AutomationEngine,
     private readonly rollup: RollupService,
+    private readonly health: SystemHealthService,
   ) {}
 
   /** Due SLA steps and follow-up dates (also called directly by tests with a fixed clock). */
@@ -132,6 +136,9 @@ export class MailWorkerService {
     await boss.work(QUEUES.analyticsSettle, async () => {
       await this.rollup.scheduled('settle');
     });
+    await boss.work(QUEUES.healthAlerts, async () => {
+      await this.health.alert();
+    });
     await boss.work<PushJob>(QUEUES.push, { localConcurrency: 4 }, async (jobs) => {
       for (const job of jobs) await this.push.send(job.data);
     });
@@ -141,9 +148,10 @@ export class MailWorkerService {
     await boss.schedule(QUEUES.purge, SCHEDULES.purge);
     await boss.schedule(QUEUES.analyticsFast, SCHEDULES.analyticsFast);
     await boss.schedule(QUEUES.analyticsSettle, SCHEDULES.analyticsSettle);
+    await boss.schedule(QUEUES.healthAlerts, SCHEDULES.healthAlerts);
     // Catch up right away after a restart instead of waiting for the first tick.
     await this.enqueuePoll();
-    await boss.send(QUEUES.analyticsSettle, {});
+    await boss.send(QUEUES.analyticsFast, {});
     // IMAP push: one IDLE connection per mailbox.
     await this.idle.start();
     this.log.log('Mail worker started');

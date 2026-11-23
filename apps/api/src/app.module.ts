@@ -6,6 +6,7 @@ import { PrismaService } from './prisma/prisma.service';
 import { envelopeProvider } from './crypto.provider';
 import { ApiExceptionFilter } from './common/exception.filter';
 import { DbContextInterceptor } from './common/db-context.interceptor';
+import { UserRateLimitGuard } from './common/user-rate-limit.guard';
 import { AuditService } from './audit/audit.service';
 import { AuditController } from './audit/audit.controller';
 import { PermissionService } from './access/permission.service';
@@ -71,6 +72,8 @@ import { AutomationService } from './automation/automation.service';
 import { AiAutomationController } from './automation/ai-automation.controller';
 import { RollupService } from './analytics/rollup.service';
 import { FileStore } from './storage/file-store.service';
+import { SystemHealthService } from './health/system-health.service';
+import { SystemController } from './health/system.controller';
 import { AnalyticsService } from './analytics/analytics.service';
 import { AnalyticsController } from './analytics/analytics.controller';
 
@@ -97,6 +100,7 @@ export function mailProviders(cfg: AppConfig, mailEndpoints?: MailEndpoints) {
     AutomationEngine,
     RollupService,
     FileStore,
+    SystemHealthService,
     CredentialService,
     IngestService,
     SyncService,
@@ -118,8 +122,8 @@ export class AppModule {
     setLoginRateLimit(cfg.LOGIN_RATE_LIMIT_PER_MIN);
     return {
       module: AppModule,
-      imports: [ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 300 }])],
-      controllers: [AuthController, UsersController, RolesController, OrgController, AuditController, HealthController, MailboxController, WebhooksController, AssignmentController, StatusController, CrmController, AiAutomationController, AnalyticsController, ThreadsController, ComposeController, EventsController, SlaController, NotificationsController],
+      imports: [ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: cfg.RATE_LIMIT_PER_IP_PER_MIN }])],
+      controllers: [AuthController, UsersController, RolesController, OrgController, AuditController, HealthController, MailboxController, WebhooksController, AssignmentController, StatusController, CrmController, AiAutomationController, AnalyticsController, SystemController, ThreadsController, ComposeController, EventsController, SlaController, NotificationsController],
       providers: [
         { provide: APP_CONFIG, useValue: cfg },
         { provide: SSO_PROVIDERS, useFactory: () => opts.ssoProviders ?? buildSsoProviders(cfg) },
@@ -153,6 +157,7 @@ export class AppModule {
         // Order matters: rate-limit first, then authentication/authorisation.
         { provide: APP_GUARD, useClass: ThrottlerGuard },
         { provide: APP_GUARD, useClass: AuthGuard },
+        { provide: APP_GUARD, useClass: UserRateLimitGuard },
         { provide: APP_FILTER, useClass: ApiExceptionFilter },
         { provide: APP_INTERCEPTOR, useClass: DbContextInterceptor },
       ],

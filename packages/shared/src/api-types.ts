@@ -800,3 +800,19 @@ export interface MyDashboard extends AnalyticsRange {
   teamMedianBusinessMinutes: number | null;
   nextUp: { id: string; subject: string; priority: string; status: string; awaitingReplySince: string | null; slaDueAt: string | null; overdue: boolean }[];
 }
+
+// ───────────── System health (Phase 10) ─────────────
+export interface HealthCheck {
+  key: string;
+  label: string;
+  status: 'ok' | 'warn' | 'fail';
+  /** One line for people, e.g. "2 mailboxes need reconnecting". */
+  detail: string;
+  /** Numeric value for monitoring (seconds, count…), when there is one. */
+  value: number | null;
+}
+export interface SystemHealth {
+  status: 'ok' | 'warn' | 'fail';
+  checkedAt: string;
+  checks: HealthCheck[];
+}

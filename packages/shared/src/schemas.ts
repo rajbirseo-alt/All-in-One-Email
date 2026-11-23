@@ -349,6 +349,7 @@ export const NOTIFICATION_TYPES = [
   { type: 'TASK_ASSIGNED', label: 'Task assigned to me', description: 'A colleague gives you a task' },
   { type: 'TASK_DUE', label: 'Task due', description: 'One of your tasks reaches its due time' },
   { type: 'AUTOMATION', label: 'Automation messages', description: 'An automation rule tells you something, e.g. an AI draft is ready for you to check' },
+  { type: 'SYSTEM_ALERT', label: 'System alerts (administrators)', description: 'A system health check fails (mail sync, sending, background jobs, virus scanner) or recovers' },
 ] as const;
 export type ActiveNotificationType = (typeof NOTIFICATION_TYPES)[number]['type'];
 const notificationTypeEnum = z.enum(NOTIFICATION_TYPES.map((t) => t.type) as [ActiveNotificationType, ...ActiveNotificationType[]]);

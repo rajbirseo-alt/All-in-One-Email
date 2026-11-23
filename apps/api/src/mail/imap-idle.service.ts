@@ -12,8 +12,8 @@ interface Watch {
   closed: boolean;
 }
 
-/** How often the set of IMAP mailboxes to watch is re-read. */
-const RECONCILE_MS = 60_000;
+/** How often the set of IMAP mailboxes to watch is re-read (a newly connected mailbox is watched within this). */
+const RECONCILE_MS = 15_000;
 const MAX_BACKOFF_MS = 5 * 60_000;
 
 /**
@@ -53,7 +53,8 @@ export class ImapIdleService implements OnModuleDestroy {
       (await this.prisma.emailAccount.findMany({ where: { provider: 'IMAP', status: { in: ['ACTIVE', 'ERROR'] } }, select: { id: true } })).map((a) => a.id),
     );
     for (const id of [...this.watches.keys()]) if (!wanted.has(id)) await this.drop(id);
-    for (const id of wanted) if (!this.watches.has(id)) await this.open(id);
+    // In parallel: one unreachable host must not hold up the others.
+    await Promise.all([...wanted].filter((id) => !this.watches.has(id)).map((id) => this.open(id)));
   }
 
   private async open(accountId: string, attempts = 0) {
@@ -70,6 +71,8 @@ export class ImapIdleService implements OnModuleDestroy {
       raw.on('close', () => this.lost(accountId, w));
       w.client = client;
       w.attempts = 0;
+      // Mail that arrived while the mailbox was not watched (just connected, or reconnecting).
+      this.trigger(accountId, w);
       // Start idling now rather than after imapflow's quiet period.
       void raw.idle().catch(() => undefined);
     } catch (e) {

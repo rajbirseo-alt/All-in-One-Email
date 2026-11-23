@@ -53,7 +53,7 @@ One thing is still open: **the definitions need sign-off** (below), for example 
 - **Hourly totals** are kept per mailbox, department, team and person, in the report time zone (`REPORT_TIMEZONE`, default Asia/Kolkata). Days start at midnight India time, not UTC.
 - **Update schedule** (worker):
   - every 10 minutes for the last 3 hours;
-  - every hour for the last 2 days, which catches later changes such as a conversation reassigned or marked spam.
+  - every night (02:15 India time) for the last 2 days, which catches later changes such as a conversation reassigned or marked spam.
   - The very first run builds the past 400 days.
 - **Repeatable:** each run replaces its hours completely, so it can be repeated at any time. Two runs never overlap, across worker instances too.
 - **Kept after purge:** when a disconnected mailbox's mail is deleted after 120 days, its figures stay.

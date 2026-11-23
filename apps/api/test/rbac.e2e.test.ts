@@ -247,3 +247,23 @@ describe('audit log integrity', () => {
     expect(text).not.toMatch(/"passwordHash":"(?!\[redacted\])/);
   });
 });
+
+describe('permission cache (Phase 10)', () => {
+  it('reuses permissions between requests, but a change through the API applies at once', async () => {
+    const { bootApp: boot, clientAs: as, makeUser: mk } = await import('./helpers');
+    const { app: a } = await boot({ env: { PERMISSION_CACHE_SECONDS: '30' } });
+    try {
+      const adminC = await as(a, (await mk({ role: 'SUPER_ADMIN' })).id);
+      const emp = await mk({ role: 'EMPLOYEE' });
+      const c = await as(a, emp.id);
+      expect((await c.get('/audit-logs')).status).toBe(403);
+      const r = await adminC.put(`/users/${emp.id}/permission-overrides`, { overrides: [{ permissionKey: 'audit.read', effect: 'GRANT', scope: 'ALL', reason: 'audit' }] });
+      expect(r.status).toBe(200);
+      expect((await c.get('/audit-logs')).status).toBe(200);
+      await adminC.put(`/users/${emp.id}/permission-overrides`, { overrides: [] });
+      expect((await c.get('/audit-logs')).status).toBe(403);
+    } finally {
+      await a.close();
+    }
+  });
+});
