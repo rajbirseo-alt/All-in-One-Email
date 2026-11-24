@@ -56,7 +56,7 @@
 
 1. **Working hours** per office (days, hours, lunch break if the clock should stop) and the **holiday list** for 2026–27.
 2. **Reply targets** per department, e.g. Sales: remind after 30 min, overdue at 2 working hours, escalate after 1 working day; HR: overdue after 1 working day.
-3. To switch on browser push, run `npx web-push generate-vapid-keys` once and put the result on the **crm-api** service on Render. The worker copies them automatically.
+3. To switch on browser push, run `npx web-push generate-vapid-keys` once and put the result in the env group **crm-integrations** on Render (shared by crm-api and crm-worker).
    - `VAPID_PUBLIC_KEY`
    - `VAPID_PRIVATE_KEY`
    - `VAPID_SUBJECT`, e.g. `mailto:it@seodiscovery.com`

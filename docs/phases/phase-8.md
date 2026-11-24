@@ -112,7 +112,7 @@ Two things are still open:
 
 ## Needed from SEO Discovery
 
-1. **An OpenAI API key** from the company's OpenAI organisation. Put it as `OPENAI_API_KEY` on the **crm-api** service on Render; the worker copies it. Optionally set `OPENAI_MODEL` (default gpt-4o-mini).
+1. **An OpenAI API key** from the company's OpenAI organisation. Put it as `OPENAI_API_KEY` in the env group **crm-integrations** on Render (shared by crm-api and crm-worker). Optionally set `OPENAI_MODEL` (default gpt-4o-mini).
 2. **Agreement on what mail may go to OpenAI.** The data processing agreement (DPA) with OpenAI must be in place. Then switch AI off for any mailbox whose mail must not go there (HR, finance…).
 3. **About 200 real emails, with consent**, labelled with the right category (sales enquiry, support, billing…), to measure how often the AI is right.
 4. **The automation rules you want.** For example: sales enquiries → sales team, high priority, AI draft; absent employees → their team.

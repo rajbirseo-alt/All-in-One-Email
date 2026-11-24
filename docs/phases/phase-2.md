@@ -76,11 +76,11 @@ Nothing in this phase has talked to the real Google or Microsoft yet. Real-accou
 
 ### C. Render
 1. Push the code. The Blueprint creates **`crm-worker`**, about $7/month on the Starter plan.
-2. In **`crm-api` → Environment**, set:
+2. In **Render → Environment Groups → `crm-integrations`**, set:
    - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
    - `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `MICROSOFT_TENANT_ID`
    - for push: `GMAIL_PUBSUB_TOPIC` (`projects/<project-id>/topics/gmail-push`) and `GMAIL_PUSH_SERVICE_ACCOUNT` (the service account's email)
-3. Save. Then redeploy **`crm-worker`** too: it copies these values from `crm-api`.
+3. Save. `crm-api` and `crm-worker` both read this group.
 
 ### D. Connect
 1. Sign in as Super Admin and open **Mailboxes → Connect Gmail / Connect Microsoft 365**.

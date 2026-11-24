@@ -48,7 +48,12 @@ export class SystemHealthService {
     try {
       return await fn();
     } catch (e) {
-      return { key, label, status: 'fail', detail: `Check failed: ${(e as Error).message.slice(0, 200)}`, value: null };
+      const msg = (e as Error).message;
+      // The job tables are created by pg-boss when the worker (or the API's first enqueue) starts.
+      if (/relation "pgboss\.[a-z_]+" does not exist/.test(msg)) {
+        return { key, label, status: 'fail', detail: 'The background worker has never started on this database (no job tables yet). Check the crm-worker service.', value: null };
+      }
+      return { key, label, status: 'fail', detail: `Check failed: ${msg.slice(0, 200)}`, value: null };
     }
   }
 

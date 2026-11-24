@@ -6,8 +6,9 @@
 # never exposed directly. Provider webhooks also arrive through crm-web.
 #
 # crm-worker runs mailbox sync, push renewal and the retention purge. Its job queue lives in
-# PostgreSQL (pg-boss), so no Redis / Key Value service is needed. It reads its secrets from
-# crm-api so both always use the same ENCRYPTION_KEYS (they decrypt the same mailbox tokens).
+# PostgreSQL (pg-boss), so no Redis / Key Value service is needed. It reads its core secrets from
+# crm-api so both always use the same ENCRYPTION_KEYS (they decrypt the same mailbox tokens), and
+# both read the optional integration keys from the env group crm-integrations.
 #
 # Secrets marked `sync: false` are entered in the Render Dashboard on first deploy.
 
@@ -23,6 +24,57 @@ projects:
             databaseName: crm # immutable
             user: crm # immutable
             ipAllowList: [] # private network only
+
+        # Optional integration keys, shared by crm-api and crm-worker: set each once here
+        # (Render → Environment Groups → crm-integrations). A key left unset keeps its feature off.
+        envVarGroups:
+          - name: crm-integrations
+            envVars:
+              # Employee sign-in and mailbox connection (Phase 2)
+              - key: GOOGLE_CLIENT_ID
+                sync: false
+              - key: GOOGLE_CLIENT_SECRET
+                sync: false
+              - key: MICROSOFT_CLIENT_ID
+                sync: false
+              - key: MICROSOFT_CLIENT_SECRET
+                sync: false
+              - key: MICROSOFT_TENANT_ID
+                sync: false
+              - key: GMAIL_PUBSUB_TOPIC # optional, enables Gmail push: projects/<project>/topics/gmail-push
+                sync: false
+              - key: GMAIL_PUSH_SERVICE_ACCOUNT # service account set on the Pub/Sub push subscription
+                sync: false
+              # Browser push notifications (optional): npx web-push generate-vapid-keys
+              - key: VAPID_PUBLIC_KEY
+                sync: false
+              - key: VAPID_PRIVATE_KEY
+                sync: false
+              - key: VAPID_SUBJECT # e.g. mailto:it@seodiscovery.com
+                sync: false
+              # AI assistant (Phase 8). Off until a key is set; mailboxes can opt out in Admin → Mailboxes.
+              - key: OPENAI_API_KEY
+                sync: false
+              - key: OPENAI_MODEL # default gpt-4o-mini
+                sync: false
+              - key: AI_AUTO_ANALYZE # true (default): analyse new mail automatically
+                sync: false
+              # Attachments (Phase 10): S3-compatible bucket (e.g. Cloudflare R2), files envelope-encrypted.
+              - key: S3_ENDPOINT # e.g. https://<account-id>.r2.cloudflarestorage.com
+                sync: false
+              - key: S3_REGION # "auto" for R2
+                sync: false
+              - key: S3_BUCKET
+                sync: false
+              - key: S3_ACCESS_KEY_ID
+                sync: false
+              - key: S3_SECRET_ACCESS_KEY
+                sync: false
+              # Virus scanning (Phase 10): a clamd service on the private network (see docs/runbooks/deploy.md).
+              - key: CLAMAV_HOST
+                sync: false
+              - key: CLAMAV_PORT # default 3310
+                sync: false
 
         services:
           - type: pserv
@@ -60,58 +112,16 @@ projects:
               # Render load balancer → crm-web (Next.js proxy) → crm-api
               - key: TRUST_PROXY_HOPS
                 value: "2"
-              - key: GOOGLE_CLIENT_ID
-                sync: false
-              - key: GOOGLE_CLIENT_SECRET
-                sync: false
-              - key: MICROSOFT_CLIENT_ID
-                sync: false
-              - key: MICROSOFT_CLIENT_SECRET
-                sync: false
-              - key: MICROSOFT_TENANT_ID
-                sync: false
               # Mailboxes (Phase 2)
               - key: MAIL_INITIAL_SYNC_DAYS
                 value: "30"
               - key: MAIL_RETENTION_DAYS # decided: mail purged 120 days after disconnect
                 value: "120"
-              - key: GMAIL_PUBSUB_TOPIC # optional, enables Gmail push: projects/<project>/topics/gmail-push
-                sync: false
-              - key: GMAIL_PUSH_SERVICE_ACCOUNT # service account set on the Pub/Sub push subscription
-                sync: false
-              # Browser push notifications (optional): npx web-push generate-vapid-keys
-              - key: VAPID_PUBLIC_KEY
-                sync: false
-              - key: VAPID_PRIVATE_KEY
-                sync: false
-              - key: VAPID_SUBJECT # e.g. mailto:it@seodiscovery.com
-                sync: false
-              # AI assistant (optional, Phase 8). Off until a key is set; mailboxes can opt out in Admin → Mailboxes.
-              - key: OPENAI_API_KEY
-                sync: false
-              - key: OPENAI_MODEL # default gpt-4o-mini
-                sync: false
-              - key: AI_AUTO_ANALYZE # true (default): analyse new mail automatically
-                sync: false
               # Reports (Phase 9): days and hours of the dashboards follow this zone.
               - key: REPORT_TIMEZONE
                 value: Asia/Kolkata
-              # Attachments (Phase 10): S3-compatible bucket (e.g. Cloudflare R2), files envelope-encrypted.
-              - key: S3_ENDPOINT # e.g. https://<account-id>.r2.cloudflarestorage.com
-                sync: false
-              - key: S3_REGION # "auto" for R2
-                sync: false
-              - key: S3_BUCKET
-                sync: false
-              - key: S3_ACCESS_KEY_ID
-                sync: false
-              - key: S3_SECRET_ACCESS_KEY
-                sync: false
-              # Virus scanning (Phase 10): a clamd service on the private network (see docs/runbooks/deploy.md).
-              - key: CLAMAV_HOST
-                sync: false
-              - key: CLAMAV_PORT # default 3310
-                sync: false
+              # Google / Microsoft / OpenAI / storage / scanner keys: the shared group below.
+              - fromGroup: crm-integrations
               # Monitoring (Phase 10): bearer token for GET /api/v1/metrics (Prometheus format). At least 24 characters.
               - key: METRICS_TOKEN
                 sync: false
@@ -139,11 +149,6 @@ projects:
                   type: pserv
                   name: crm-api
                   envVarKey: APP_URL
-              - key: ALLOWED_LOGIN_DOMAINS
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: ALLOWED_LOGIN_DOMAINS
               - key: SESSION_SECRET
                 fromService:
                   type: pserv
@@ -159,31 +164,6 @@ projects:
                   type: pserv
                   name: crm-api
                   envVarKey: PERSONAL_ACCOUNT_LOGIN
-              - key: GOOGLE_CLIENT_ID
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: GOOGLE_CLIENT_ID
-              - key: GOOGLE_CLIENT_SECRET
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: GOOGLE_CLIENT_SECRET
-              - key: MICROSOFT_CLIENT_ID
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: MICROSOFT_CLIENT_ID
-              - key: MICROSOFT_CLIENT_SECRET
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: MICROSOFT_CLIENT_SECRET
-              - key: MICROSOFT_TENANT_ID
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: MICROSOFT_TENANT_ID
               - key: MAIL_INITIAL_SYNC_DAYS
                 fromService:
                   type: pserv
@@ -194,86 +174,12 @@ projects:
                   type: pserv
                   name: crm-api
                   envVarKey: MAIL_RETENTION_DAYS
-              - key: GMAIL_PUBSUB_TOPIC
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: GMAIL_PUBSUB_TOPIC
-              - key: GMAIL_PUSH_SERVICE_ACCOUNT
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: GMAIL_PUSH_SERVICE_ACCOUNT
-              - key: VAPID_PUBLIC_KEY
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: VAPID_PUBLIC_KEY
-              - key: VAPID_PRIVATE_KEY
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: VAPID_PRIVATE_KEY
-              - key: VAPID_SUBJECT
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: VAPID_SUBJECT
-              - key: OPENAI_API_KEY
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: OPENAI_API_KEY
-              - key: OPENAI_MODEL
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: OPENAI_MODEL
-              - key: AI_AUTO_ANALYZE
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: AI_AUTO_ANALYZE
               - key: REPORT_TIMEZONE
                 fromService:
                   type: pserv
                   name: crm-api
                   envVarKey: REPORT_TIMEZONE
-              - key: S3_ENDPOINT
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: S3_ENDPOINT
-              - key: S3_REGION
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: S3_REGION
-              - key: S3_BUCKET
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: S3_BUCKET
-              - key: S3_ACCESS_KEY_ID
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: S3_ACCESS_KEY_ID
-              - key: S3_SECRET_ACCESS_KEY
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: S3_SECRET_ACCESS_KEY
-              - key: CLAMAV_HOST
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: CLAMAV_HOST
-              - key: CLAMAV_PORT
-                fromService:
-                  type: pserv
-                  name: crm-api
-                  envVarKey: CLAMAV_PORT
+              - fromGroup: crm-integrations
 
           - type: web
             name: crm-web
