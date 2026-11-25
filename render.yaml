@@ -149,6 +149,11 @@ projects:
                   type: pserv
                   name: crm-api
                   envVarKey: APP_URL
+              - key: ALLOWED_LOGIN_DOMAINS # required by the shared config check, also in the worker
+                fromService:
+                  type: pserv
+                  name: crm-api
+                  envVarKey: ALLOWED_LOGIN_DOMAINS
               - key: SESSION_SECRET
                 fromService:
                   type: pserv
